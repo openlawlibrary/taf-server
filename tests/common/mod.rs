@@ -12,7 +12,7 @@ use actix_web::{
 use anyhow::Result;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::Once;
+use std::sync::{Arc, Once, PoisonError, RwLock};
 use taf_server::db::models::redirects::Manager as _;
 use taf_server::db::{self, DatabaseConnection};
 use taf_server::server::api::state::Global;
@@ -41,7 +41,7 @@ pub fn blob_to_string(blob: Vec<u8>) -> String {
 pub struct TestAppState {
     pub archive: Archive,
     pub db: DatabaseConnection,
-    pub repos_with_redirects: HashSet<(String, String)>,
+    pub repos_with_redirects: Arc<RwLock<HashSet<(String, String)>>>,
 }
 
 impl Global for TestAppState {
@@ -53,7 +53,15 @@ impl Global for TestAppState {
     }
     fn has_redirects(&self, fonds: &str, repo_name: &str) -> bool {
         self.repos_with_redirects
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
             .contains(&(fonds.to_owned(), repo_name.to_owned()))
+    }
+    fn set_repos_with_redirects(&self, repos: HashSet<(String, String)>) {
+        *self
+            .repos_with_redirects
+            .write()
+            .unwrap_or_else(PoisonError::into_inner) = repos;
     }
 }
 
@@ -62,8 +70,9 @@ impl Global for TestAppState {
 /// NOTE: The set of repos with redirects is computed once, at this point,
 /// mirroring production start-up. Any redirects inserted into the database
 /// *after* calling this must be for a repo that already had at least one
-/// redirect, otherwise they won't be picked up until the app is
-/// re-initialized.
+/// redirect, otherwise they won't be picked up until either the app is
+/// re-initialized, or a request is sent to the `/_internal/redirects/refresh`
+/// endpoint from a loopback address.
 pub async fn initialize_app(
     archive_path: &Path,
 ) -> impl Service<Request, Response = ServiceResponse<impl MessageBody>, Error = Error> {
@@ -73,7 +82,7 @@ pub async fn initialize_app(
     let state = TestAppState {
         archive,
         db,
-        repos_with_redirects,
+        repos_with_redirects: Arc::new(RwLock::new(repos_with_redirects)),
     };
     let app = app::init(&state).unwrap();
     test::init_service(app).await

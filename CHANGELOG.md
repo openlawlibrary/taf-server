@@ -10,11 +10,15 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 
 ### Added
 
+- Add `POST /_internal/redirects/refresh` so a running server can pick up redirects inserted by `taf-server update` without restarting  ([#132])
+
 ### Changed
 
 ### Fixed
 
 ### Removed
+
+[#132]: https://github.com/openlawlibrary/taf-server/pull/132
 
 ## [v0.7.0]
 
