@@ -1,7 +1,7 @@
 [package]
 name = "taf-server"
 description = "A collection of tools in Rust and Python for preserving, authenticating, and accessing laws in perpetuity."
-version = "0.7.0"
+version = "0.7.1"
 edition = "2021"
 readme = "README.md"
 license = "AGPL-3.0"
