@@ -38,7 +38,7 @@ use crate::{
             data_repo_commits::{self},
             publication::{self, Publication},
         },
-        DatabaseTransaction,
+        DatabaseTransaction, Tx as _,
     },
     utils::{git::Repo, http::get_contenttype, paths::clean_path},
 };
@@ -123,6 +123,12 @@ pub async fn date(
         }
     };
 
+    let latest_publication_res = get_publication(&mut tx, &auth_fonds_name).await;
+    if let Err(err) = tx.commit().await {
+        tracing::error!(error = %err, "Couldn't close Database Transaction");
+        return HttpResponse::NotFound().body("");
+    }
+
     let doc_path = params.path.as_deref().unwrap_or("");
     let (blob, content_type) = match get_document(
         &data.archive.path,
@@ -183,7 +189,7 @@ pub async fn date(
         }
 
         // Outdated publication notification: shown when a newer publication exists
-        match get_publication(&mut tx, &auth_fonds_name).await {
+        match latest_publication_res {
             Ok(latest_publication) => {
                 if publication.name != latest_publication.name {
                     let current_date_str = current_date.as_deref().unwrap_or_default();
