@@ -20,6 +20,18 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 
 [#132]: https://github.com/openlawlibrary/taf-server/pull/132
 
+## [v0.7.1]
+
+### Added
+
+### Changed
+
+### Fixed
+
+- Release the `_date` handler's database transaction before acquiring further pool connections, fixing a connection pool deadlock under concurrent requests ([#134])
+
+### Removed
+
 ## [v0.7.0]
 
 ### Added
@@ -32,6 +44,7 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 
 ### Removed
 
+[#134]: https://github.com/openlawlibrary/taf-server/pull/134
 [#130]: https://github.com/openlawlibrary/taf-server/pull/130
 
 ## [v0.7.0-alpha.1]
@@ -416,7 +429,8 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 
 ### Removed
 
-[Unreleased]: https://github.com/openlawlibrary/taf-server/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/openlawlibrary/taf-server/compare/v0.7.1...HEAD
+[v0.7.1]: https://github.com/openlawlibrary/taf-server/compare/v0.7.0...v0.7.1
 [v0.7.0]: https://github.com/openlawlibrary/taf-server/compare/v0.7.0-alpha.1...v0.7.0
 [v0.7.0-alpha.1]: https://github.com/openlawlibrary/taf-server/compare/v0.6.9...v0.7.0-alpha.1
 [v0.6.9]: https://github.com/openlawlibrary/taf-server/compare/v0.6.8...v0.6.9
