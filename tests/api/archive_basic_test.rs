@@ -402,3 +402,34 @@ async fn test_redirect_law_html_request_with_duplicated_entries_in_redirects_exp
 
     assert_eq!(location, "/");
 }
+
+#[actix_web::test]
+async fn test_refresh_redirects_endpoint_picks_up_new_redirects() {
+    let archive_path =
+        common::initialize_archive_without_bare(ArchiveType::Basic(Jurisdiction::Single)).unwrap();
+    let db = get_db(archive_path.path()).await;
+    let app = common::initialize_app(archive_path.path()).await;
+
+    // No redirects configured yet, so the repo isn't in the startup cache.
+    let request_uri = "/a/b/c.html";
+    let req = test::TestRequest::get().uri(request_uri).to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_ne!(resp.status(), StatusCode::TEMPORARY_REDIRECT);
+
+    // Insert a redirect directly into the database, bypassing the in-memory cache.
+    insert_redirects(&db, "test_org/law", "law-html", vec![("/a/b/c.html", "/")]).await;
+
+    // Hit the refresh endpoint, as the update script does after `taf-server update`.
+    let refresh_req = test::TestRequest::post()
+        .uri("/_internal/redirects/refresh")
+        .to_request();
+    let refresh_resp = test::call_service(&app, refresh_req).await;
+    assert_eq!(refresh_resp.status(), StatusCode::OK);
+
+    // The redirect is now picked up without restarting the app.
+    let req2 = test::TestRequest::get().uri(request_uri).to_request();
+    let resp2 = test::call_service(&app, req2).await;
+    assert_eq!(resp2.status(), StatusCode::TEMPORARY_REDIRECT);
+    drop(db);
+}

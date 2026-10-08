@@ -17,6 +17,7 @@ use actix_web::{
 
 use super::archive::get_blob;
 use super::date::date;
+use super::internal::redirects;
 use super::{serve::serve, state::Global, versions::versions};
 
 /// Name of the header to guard current documents
@@ -84,6 +85,13 @@ pub fn register_app<
             ),
         )
         .app_data(web::Data::new(state.clone()));
+
+    let redirects_data_state: Arc<dyn Global> = Arc::new(state.clone());
+    app = app
+        .service(
+            web::resource("/_internal/redirects/refresh").route(web::post().to(redirects::refresh)),
+        )
+        .app_data(web::Data::new(redirects_data_state));
 
     app = app
         .service(
