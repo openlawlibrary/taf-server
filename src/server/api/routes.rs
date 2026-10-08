@@ -17,7 +17,7 @@ use actix_web::{
 
 use super::archive::get_blob;
 use super::date::date;
-use super::redirects;
+use super::internal::redirects;
 use super::{serve::serve, state::Global, versions::versions};
 
 /// Name of the header to guard current documents

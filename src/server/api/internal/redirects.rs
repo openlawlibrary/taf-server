@@ -6,7 +6,7 @@ use actix_web::{web, HttpResponse, Responder};
 
 use crate::db::models::redirects::Manager as _;
 
-use super::state::Global;
+use super::super::state::Global;
 
 /// Recomputes the set of `(fonds, repo)` pairs that have at least one
 /// redirect configured, and replaces the server's in-memory cache with the
