@@ -60,7 +60,7 @@ impl FondsGraph {
     /// Errors if the term is not an RDF literal.
     pub fn term_to_literal(&self, term: &[&SimpleTerm<'_>; 3]) -> anyhow::Result<String> {
         match &term.o() {
-            SimpleTerm::LiteralDatatype(literal, _) | SimpleTerm::LiteralLanguage(literal, _) => {
+            SimpleTerm::LiteralDatatype(literal, _) | SimpleTerm::LiteralLanguage(literal, _, _) => {
                 Ok(literal.to_string())
             }
             SimpleTerm::Iri(_)
