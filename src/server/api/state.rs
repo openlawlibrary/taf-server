@@ -3,6 +3,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::{self, Debug},
     path::PathBuf,
+    sync::{Arc, PoisonError, RwLock},
 };
 
 use crate::{
@@ -38,6 +39,12 @@ pub trait Global: Debug {
     fn db(&self) -> &db::DatabaseConnection;
     /// Whether the given repository has any redirects configured.
     fn has_redirects(&self, fonds: &str, repo_name: &str) -> bool;
+    /// Replaces the cached set of `(fonds_name, repo_name)` pairs that have at
+    /// least one redirect configured.
+    ///
+    /// Used to pick up redirects inserted into the database after start-up
+    /// (e.g. by `taf-server update`) without requiring a server restart.
+    fn set_repos_with_redirects(&self, repos: HashSet<(String, String)>);
 }
 
 /// Application state
@@ -47,9 +54,13 @@ pub struct App {
     pub archive: Archive,
     /// Database connection
     pub db: db::DatabaseConnection,
-    /// `(fonds_name, repo_name)` pairs that have at least one redirect,
-    /// computed once at startup.
-    pub repos_with_redirects: HashSet<(String, String)>,
+    /// `(fonds_name, repo_name)` pairs that have at least one redirect.
+    ///
+    /// Computed once at startup, and refreshed on demand (via
+    /// [`Global::set_repos_with_redirects`]). Wrapped in `Arc<RwLock<_>>` so
+    /// every clone of `App` - one per Actix worker/scope - shares and
+    /// observes the same underlying cache.
+    pub repos_with_redirects: Arc<RwLock<HashSet<(String, String)>>>,
 }
 
 impl Global for App {
@@ -63,7 +74,16 @@ impl Global for App {
 
     fn has_redirects(&self, fonds: &str, repo_name: &str) -> bool {
         self.repos_with_redirects
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
             .contains(&(fonds.to_owned(), repo_name.to_owned()))
+    }
+
+    fn set_repos_with_redirects(&self, repos: HashSet<(String, String)>) {
+        *self
+            .repos_with_redirects
+            .write()
+            .unwrap_or_else(PoisonError::into_inner) = repos;
     }
 }
 

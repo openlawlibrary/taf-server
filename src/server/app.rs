@@ -12,7 +12,12 @@ use actix_web::dev::{ServiceRequest, ServiceResponse};
 use actix_web::{App, Error, HttpServer};
 use tracing_actix_web::TracingLogger;
 
-use std::{collections::HashSet, path::PathBuf, process};
+use std::{
+    collections::HashSet,
+    path::PathBuf,
+    process,
+    sync::{Arc, RwLock},
+};
 
 use actix_http::body::MessageBody;
 use actix_service::ServiceFactory;
@@ -66,7 +71,7 @@ pub async fn serve_archive(
     let state = AppState {
         archive,
         db,
-        repos_with_redirects,
+        repos_with_redirects: Arc::new(RwLock::new(repos_with_redirects)),
     };
 
     HttpServer::new(move || {
