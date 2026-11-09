@@ -25,7 +25,7 @@ use crate::db::models::{fonds, version};
 use crate::db::{DatabaseTransaction, Tx as _};
 use crate::fonds::fonds::Fonds;
 use crate::fonds::types::repositories::Repository;
-use crate::history::rdf::graph::FondsGraph;
+use crate::history::rdf::graph::{FondsGraph, FondsTerm};
 use crate::history::rdf::namespaces::{dcterms, oll};
 use crate::redirects::insert_redirects_for_fonds;
 use crate::server::errors::CliError;
@@ -40,7 +40,7 @@ use anyhow::Context as _;
 use chrono::DateTime;
 use git2::{TreeWalkMode, TreeWalkResult};
 use sophia::api::ns::rdfs;
-use sophia::api::{prelude::*, term::SimpleTerm};
+use sophia::api::prelude::*;
 use sophia::xml::parser;
 use sqlx::types::chrono::NaiveDate;
 use std::{
@@ -477,7 +477,7 @@ async fn load_delta_for_publication(
 async fn insert_document_changes(
     tx: &mut DatabaseTransaction,
     last_inserted_date: Option<&NaiveDate>,
-    pub_document_versions: Vec<&SimpleTerm<'_>>,
+    pub_document_versions: Vec<FondsTerm<'_>>,
     pub_graph: &FondsGraph,
     publication: &Publication,
 ) -> anyhow::Result<()> {
@@ -518,12 +518,11 @@ async fn insert_document_changes(
         let changes = Bag::new(pub_graph, changes_uri);
         for change in changes.items()? {
             let doc_mpath = pub_graph.literal_from_triple_matching(
-                Some(&change),
+                Some(change),
                 Some(oll::documentMaterializedPath),
                 None,
             )?;
-            let url =
-                pub_graph.literal_from_triple_matching(Some(&change), Some(oll::url), None)?;
+            let url = pub_graph.literal_from_triple_matching(Some(change), Some(oll::url), None)?;
             document_elements_bulk.push(DocumentElement::new(
                 doc_mpath.clone(),
                 url.clone(),
@@ -531,10 +530,10 @@ async fn insert_document_changes(
                 publication.fonds.clone(),
             ));
             let reason = pub_graph
-                .literal_from_triple_matching(Some(&change), Some(oll::reason), None)
+                .literal_from_triple_matching(Some(change), Some(oll::reason), None)
                 .ok();
             let statuses = pub_graph.all_literals_from_triple_matching(
-                Some(&change),
+                Some(change),
                 Some(oll::status),
                 None,
             )?;
@@ -565,7 +564,7 @@ async fn insert_document_changes(
 async fn insert_library_changes(
     tx: &mut DatabaseTransaction,
     last_inserted_date: Option<&NaiveDate>,
-    pub_collection_versions: Vec<&SimpleTerm<'_>>,
+    pub_collection_versions: Vec<FondsTerm<'_>>,
     pub_graph: &FondsGraph,
     publication: &Publication,
 ) -> anyhow::Result<()> {
@@ -612,12 +611,12 @@ async fn insert_library_changes(
         let changes = Bag::new(pub_graph, changes_uri);
         for change in changes.items()? {
             let Ok(found_status) =
-                pub_graph.literal_from_triple_matching(Some(&change), Some(oll::status), None)
+                pub_graph.literal_from_triple_matching(Some(change), Some(oll::status), None)
             else {
                 continue;
             };
             let Ok(doc_mpath) = pub_graph.literal_from_triple_matching(
-                Some(&change),
+                Some(change),
                 Some(oll::documentMaterializedPath),
                 None,
             ) else {
