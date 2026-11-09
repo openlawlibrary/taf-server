@@ -14,10 +14,13 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 
 ### Changed
 
+- Bump `sophia` to 0.10 ([#120])
+
 ### Fixed
 
 ### Removed
 
+[#120]: https://github.com/openlawlibrary/taf-server/pull/120
 [#132]: https://github.com/openlawlibrary/taf-server/pull/132
 
 ## [v0.7.1]
