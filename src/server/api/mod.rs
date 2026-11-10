@@ -3,6 +3,7 @@ pub mod archive;
 pub mod date;
 pub mod doc_transform;
 pub mod internal;
+pub mod menu;
 pub mod routes;
 pub mod serve;
 pub mod state;

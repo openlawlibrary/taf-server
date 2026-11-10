@@ -22,7 +22,6 @@ use std::{
 use actix_http::body::MessageBody;
 use actix_service::ServiceFactory;
 
-use super::api::state::Global;
 use super::tracing::TafServerRootSpanBuilder;
 use crate::server::api::routes;
 
@@ -105,8 +104,8 @@ pub async fn serve_archive(
 /// * `state` - The application state
 /// # Errors
 /// Will error if unable to initialize the application
-pub fn init<T: Global + Clone + 'static>(
-    state: &T,
+pub fn init(
+    state: &AppState,
 ) -> anyhow::Result<
     App<
         impl ServiceFactory<

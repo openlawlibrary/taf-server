@@ -4,6 +4,26 @@ use sqlx::{any::AnyRow, FromRow, Row as _};
 
 pub mod manager;
 
+/// Trait for reading publication versions outside a transaction.
+#[async_trait]
+pub trait Manager {
+    /// The newest version date mapped into a publication, or `None` when the
+    /// publication has no versions at all.
+    async fn find_latest_version_for_publication(
+        &self,
+        publication_id: &str,
+    ) -> anyhow::Result<Option<String>>;
+    /// The `publication_version` ids carrying a given version date in a
+    /// publication; a lightweight publication can map two, and they union.
+    ///
+    /// An empty result means the date does not exist here, which is a 404.
+    async fn find_version_ids_in_publication(
+        &self,
+        publication_id: &str,
+        version: &str,
+    ) -> anyhow::Result<Vec<String>>;
+}
+
 /// Trait for managing transactions on publication versions.
 #[async_trait]
 pub trait TxManager {

@@ -1,8 +1,66 @@
 //! Manager for the `publication_version` model.
 use super::PublicationVersion;
-use crate::db::DatabaseTransaction;
+use crate::db::{DatabaseConnection, DatabaseKind, DatabaseTransaction};
 use async_trait::async_trait;
 use std::collections::HashSet;
+
+#[async_trait]
+impl super::Manager for DatabaseConnection {
+    /// The newest version date mapped into a publication.
+    ///
+    /// # Errors
+    /// Errors if can't establish a connection to the database.
+    async fn find_latest_version_for_publication(
+        &self,
+        publication_id: &str,
+    ) -> anyhow::Result<Option<String>> {
+        let statement = "
+            SELECT MAX(pv.version) AS codified_date
+            FROM publication_has_publication_versions phpv
+            JOIN publication_version pv ON pv.id = phpv.publication_version_id
+            WHERE phpv.publication_id = $1
+        ";
+        let row = match self.kind {
+            DatabaseKind::Sqlite => {
+                let mut connection = self.pool.acquire().await?;
+                sqlx::query_as::<_, (Option<String>,)>(statement)
+                    .bind(publication_id)
+                    .fetch_optional(&mut *connection)
+                    .await?
+            }
+        };
+        Ok(row.and_then(|found| found.0))
+    }
+
+    /// The `publication_version` ids carrying a given version date in a
+    /// publication.
+    ///
+    /// # Errors
+    /// Errors if can't establish a connection to the database.
+    async fn find_version_ids_in_publication(
+        &self,
+        publication_id: &str,
+        version: &str,
+    ) -> anyhow::Result<Vec<String>> {
+        let statement = "
+            SELECT pv.id AS id
+            FROM publication_has_publication_versions phpv
+            JOIN publication_version pv ON pv.id = phpv.publication_version_id
+            WHERE phpv.publication_id = $1 AND pv.version = $2
+        ";
+        let rows = match self.kind {
+            DatabaseKind::Sqlite => {
+                let mut connection = self.pool.acquire().await?;
+                sqlx::query_as::<_, (String,)>(statement)
+                    .bind(publication_id)
+                    .bind(version)
+                    .fetch_all(&mut *connection)
+                    .await?
+            }
+        };
+        Ok(rows.into_iter().map(|row| row.0).collect())
+    }
+}
 
 #[async_trait]
 impl super::TxManager for DatabaseTransaction {

@@ -18,6 +18,7 @@ use actix_web::{
 use super::archive::get_blob;
 use super::date::date;
 use super::internal::redirects;
+use super::menu::{menu, menu_tree};
 use super::{serve::serve, state::Global, versions::versions};
 
 /// Name of the header to guard current documents
@@ -40,7 +41,6 @@ static ROOT_NAME_VALUE: OnceLock<String> = OnceLock::new();
 /// Errors if unable to register dynamic routes (e.g. if git repository cannot be opened)
 #[tracing::instrument(skip(app, state))]
 pub fn register_app<
-    T: Global + Clone + 'static,
     U: MessageBody,
     V: ServiceFactory<
         ServiceRequest,
@@ -51,11 +51,12 @@ pub fn register_app<
     >,
 >(
     mut app: App<V>,
-    state: &T,
+    state: &state::App,
 ) -> anyhow::Result<App<V>> {
     app = app
         .service(
-            web::scope("/_api").service(
+            web::scope("/_api")
+                .service(
                 web::scope("/versions")
                     .service(
                         web::resource("/_publication/{publication}/_compare/{date}/{compare_date}")
@@ -82,10 +83,16 @@ pub fn register_app<
                     .service(web::resource("/_date/{date}/{path:.*}").to(versions))
                     .service(web::resource("/{path:.*}").to(versions))
                     .service(web::resource("").to(versions)),
-            ),
+                )
+                .service(menu_scope()),
         )
         .app_data(web::Data::new(state.clone()));
 
+    // Not `Send + Sync`, because `Archive` owns git2-rs handles.
+    #[expect(
+        clippy::arc_with_non_send_sync,
+        reason = "Actix builds one App per worker thread and never moves this state between them"
+    )]
     let redirects_data_state: Arc<dyn Global> = Arc::new(state.clone());
     app = app
         .service(
@@ -137,6 +144,69 @@ pub fn register_app<
 
     app = register_guarded_and_unguarded_routes(app, state)?;
     Ok(app)
+}
+
+#[expect(
+    clippy::literal_string_with_formatting_args,
+    reason = "Actix Web resource path uses `{param}` syntax which is not formatting but route pattern matching"
+)]
+/// Routes for the cascading (multi-level) menu endpoint.
+///
+/// Registration order is load-bearing: actix matches in order and `{path:.*}`
+/// would otherwise swallow `_date/...`. The dateless variants are registered
+/// deliberately, so omitting the date is a 400 rather than an actix 404.
+fn menu_scope() -> Scope {
+    web::scope("/menu")
+        .service(
+            web::resource("/_publication/{publication}/_date/{date}/{path:.*}")
+                .route(web::get().to(menu))
+                .route(web::head().to(menu)),
+        )
+        .service(
+            web::resource("/_publication/{publication}/_date/{date}")
+                .route(web::get().to(menu))
+                .route(web::head().to(menu)),
+        )
+        .service(
+            web::resource("/_tree/{path:.*}")
+                .route(web::get().to(menu_tree))
+                .route(web::head().to(menu_tree)),
+        )
+        .service(
+            web::resource("/_tree")
+                .route(web::get().to(menu_tree))
+                .route(web::head().to(menu_tree)),
+        )
+        .service(
+            web::resource("/_date/{date}/{path:.*}")
+                .route(web::get().to(menu))
+                .route(web::head().to(menu)),
+        )
+        .service(
+            web::resource("/_date/{date}")
+                .route(web::get().to(menu))
+                .route(web::head().to(menu)),
+        )
+        .service(
+            web::resource("/_publication/{publication}/{path:.*}")
+                .route(web::get().to(menu))
+                .route(web::head().to(menu)),
+        )
+        .service(
+            web::resource("/_publication/{publication}")
+                .route(web::get().to(menu))
+                .route(web::head().to(menu)),
+        )
+        .service(
+            web::resource("/{path:.*}")
+                .route(web::get().to(menu))
+                .route(web::head().to(menu)),
+        )
+        .service(
+            web::resource("")
+                .route(web::get().to(menu))
+                .route(web::head().to(menu)),
+        )
 }
 
 /// Initialize all dynamic routes for the given Archive.
