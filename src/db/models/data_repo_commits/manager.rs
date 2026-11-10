@@ -92,6 +92,8 @@ impl super::TxManager for DatabaseTransaction {
     /// the provided date.
     /// If `version_date` is not a valid ISO date, the latest available commit
     /// for the publication is returned regardless of date.
+    /// Commits recorded without a `codified_date` are used only when no dated
+    /// commit matches, so a date before the first dated commit finds nothing.
     ///
     /// # Errors
     /// Returns an error if the commit cannot be retrieved from the database
@@ -139,6 +141,7 @@ impl super::TxManager for DatabaseTransaction {
                 SELECT *
                 FROM data_repo_commits
                 WHERE publication_id = $1
+                AND codified_date IS NULL
                 ORDER BY build_date DESC, auth_commit_timestamp DESC
                 LIMIT 1
             ";
