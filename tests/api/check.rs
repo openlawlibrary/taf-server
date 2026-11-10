@@ -1095,37 +1095,23 @@ fn test_check_when_xml_repo_missing_codified_date_expect_only_build_date_warning
 }
 
 #[test]
-fn test_check_when_dependency_route_invalid_expect_error() {
+fn test_check_when_dependency_field_missing_and_route_invalid_expect_errors() {
     let archive_path =
         common::initialize_archive_without_bare(ArchiveType::Basic(Jurisdiction::Single)).unwrap();
     make_root_valid(archive_path.path(), "test_org", &[]).unwrap();
     init_minimal_valid_fonds(archive_path.path(), "ghost_org").unwrap();
-    let content = r#"
-    {
-        "repositories": {
-            "ghost_org/law-html": { "custom": { "serve": "latest", "routes": ["(unclosed"] } }
-        }
-    }
-    "#
-    .to_string();
+    let repositories = r#"{ "repositories": { "ghost_org/law-html": { "custom": { "serve": "latest", "routes": ["(unclosed"] } } } }"#;
     write_to_file(
         &archive_path.path().join("ghost_org/law"),
-        content,
-        "repositories.json".to_string(),
+        repositories.to_owned(),
+        "repositories.json".to_owned(),
     )
     .unwrap();
-    let dependencies = r#"
-    {
-        "dependencies": {
-            "ghost_org/law": { "out-of-band-authentication": "abc123", "branch": "main" }
-        }
-    }
-    "#
-    .to_string();
+    let dependencies = r#"{ "dependencies": { "ghost_org/law": { "branch": "main" } } }"#;
     write_to_file(
         &archive_path.path().join("test_org/law"),
-        dependencies,
-        "dependencies.json".to_string(),
+        dependencies.to_owned(),
+        "dependencies.json".to_owned(),
     )
     .unwrap();
 
@@ -1135,35 +1121,15 @@ fn test_check_when_dependency_route_invalid_expect_error() {
     )
     .unwrap();
 
-    assert_eq!(report.errors.len(), 1, "errors: {:?}", report.errors);
-    assert!(report.errors[0]
-        .message
-        .contains("invalid route '(unclosed'"));
-}
-
-#[test]
-fn test_check_when_dependency_field_missing_expect_error() {
-    let archive_path =
-        common::initialize_archive_without_bare(ArchiveType::Basic(Jurisdiction::Single)).unwrap();
-    make_root_valid(archive_path.path(), "test_org", &[]).unwrap();
-    init_minimal_valid_fonds(archive_path.path(), "ghost_org").unwrap();
-    let dependencies =
-        r#"{ "dependencies": { "ghost_org/law": { "branch": "main" } } }"#.to_string();
-    write_to_file(
-        &archive_path.path().join("test_org/law"),
-        dependencies,
-        "dependencies.json".to_string(),
-    )
-    .unwrap();
-
-    let report = check::check(
-        archive_path.path().to_str().unwrap(),
-        archive_path.path().to_path_buf(),
-    )
-    .unwrap();
-
-    assert_eq!(report.errors.len(), 1, "errors: {:?}", report.errors);
-    assert!(report.errors[0]
-        .message
-        .contains("out-of-band-authentication"));
+    let actual: Vec<bool> = ["out-of-band-authentication", "invalid route '(unclosed'"]
+        .iter()
+        .map(|message| {
+            report
+                .errors
+                .iter()
+                .any(|error| error.message.contains(message))
+        })
+        .collect();
+    assert_eq!(actual, [true, true], "errors: {:?}", report.errors);
+    assert_eq!(report.errors.len(), 2, "errors: {:?}", report.errors);
 }

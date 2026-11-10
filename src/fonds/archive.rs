@@ -108,8 +108,7 @@ impl Archive {
 
     /// Traverse the child Fonds of the current Fonds.
     ///
-    /// A child Fonds that cannot be loaded is logged and skipped, so that it
-    /// does not stop the other Fonds from loading.
+    /// A child Fonds that fails to load is logged and skipped.
     /// # Errors
     /// Will raise error if unable to read the current Fonds's dependencies.
     /// # Panics
@@ -124,44 +123,42 @@ impl Archive {
                 if visited.contains(&qualified_name) {
                     continue;
                 }
-                let parent_dir = self.path.clone();
-                let Ok((org, name)) = get_name_parts(&qualified_name) else {
-                    tracing::error!(
-                        "Skipping Fonds '{qualified_name}': not in '<org>/<name>' format"
-                    );
-                    continue;
-                };
-                if fs::metadata(parent_dir.join(&org).join(&name)).is_err() {
-                    // Fonds does not exist on the filesystem, continue to traverse other Fonds
-                    continue;
-                }
-                let child = match Fonds::new(
-                    &self.path,
-                    Some(name),
-                    Some(org.clone()),
-                    Some(parent_dir.join(org)),
-                    false,
-                ) {
-                    Ok(child) => child,
-                    Err(err) => {
-                        tracing::error!("Skipping Fonds '{qualified_name}': {err:#}");
-                        continue;
-                    }
-                };
-                self.fonds_map
-                    .entry(format!(
-                        "{org}/{name}",
-                        org = child.auth_repo.org,
-                        name = child.auth_repo.name
-                    ))
-                    .or_insert_with(|| child.clone());
-                visited.push(child.get_qualified_name());
-                if let Err(err) = self.traverse_children(&child, visited) {
-                    tracing::error!("Skipping dependencies of Fonds '{qualified_name}': {err:#}");
+                if let Err(err) = self.traverse_child(&qualified_name, visited) {
+                    tracing::error!("Skipping Fonds '{qualified_name}': {err:#}");
                 }
             }
         }
         Ok(())
+    }
+
+    /// Load the child Fonds `qualified_name`, then traverse its children.
+    fn traverse_child(
+        &mut self,
+        qualified_name: &str,
+        visited: &mut Vec<String>,
+    ) -> anyhow::Result<()> {
+        let parent_dir = self.path.clone();
+        let (org, name) = get_name_parts(qualified_name)?;
+        if fs::metadata(parent_dir.join(&org).join(&name)).is_err() {
+            // Fonds does not exist on the filesystem, continue to traverse other Fonds
+            return Ok(());
+        }
+        let child = Fonds::new(
+            &self.path,
+            Some(name),
+            Some(org.clone()),
+            Some(parent_dir.join(org)),
+            false,
+        )?;
+        self.fonds_map
+            .entry(format!(
+                "{org}/{name}",
+                org = child.auth_repo.org,
+                name = child.auth_repo.name
+            ))
+            .or_insert_with(|| child.clone());
+        visited.push(child.get_qualified_name());
+        self.traverse_children(&child, visited)
     }
 }
 
