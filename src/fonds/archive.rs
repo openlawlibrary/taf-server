@@ -107,8 +107,11 @@ impl Archive {
     }
 
     /// Traverse the child Fonds of the current Fonds.
+    ///
+    /// A child Fonds that cannot be loaded is logged and skipped, so that it
+    /// does not stop the other Fonds from loading.
     /// # Errors
-    /// Will raise error if unable to traverse the child fonds.
+    /// Will raise error if unable to read the current Fonds's dependencies.
     /// # Panics
     /// If unable to unwrap the parent directory of the current path.
     pub fn traverse_children(
@@ -122,18 +125,29 @@ impl Archive {
                     continue;
                 }
                 let parent_dir = self.path.clone();
-                let (org, name) = get_name_parts(&qualified_name)?;
+                let Ok((org, name)) = get_name_parts(&qualified_name) else {
+                    tracing::error!(
+                        "Skipping Fonds '{qualified_name}': not in '<org>/<name>' format"
+                    );
+                    continue;
+                };
                 if fs::metadata(parent_dir.join(&org).join(&name)).is_err() {
                     // Fonds does not exist on the filesystem, continue to traverse other Fonds
                     continue;
                 }
-                let child = Fonds::new(
+                let child = match Fonds::new(
                     &self.path,
                     Some(name),
                     Some(org.clone()),
                     Some(parent_dir.join(org)),
                     false,
-                )?;
+                ) {
+                    Ok(child) => child,
+                    Err(err) => {
+                        tracing::error!("Skipping Fonds '{qualified_name}': {err:#}");
+                        continue;
+                    }
+                };
                 self.fonds_map
                     .entry(format!(
                         "{org}/{name}",
@@ -142,7 +156,9 @@ impl Archive {
                     ))
                     .or_insert_with(|| child.clone());
                 visited.push(child.get_qualified_name());
-                self.traverse_children(&child, visited)?;
+                if let Err(err) = self.traverse_children(&child, visited) {
+                    tracing::error!("Skipping dependencies of Fonds '{qualified_name}': {err:#}");
+                }
             }
         }
         Ok(())

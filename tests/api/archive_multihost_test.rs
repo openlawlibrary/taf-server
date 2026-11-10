@@ -388,3 +388,32 @@ async fn test_redirect_dependant_fonds_law_html_requests_with_correct_redirects_
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     drop(db);
 }
+
+#[actix_web::test]
+async fn test_resolve_guarded_fonds_where_other_fonds_repositories_invalid_expect_success() {
+    for repositories in [
+        r#"{ "repositories": { "fonds_2/law-html": { "custom": { "serve": "latest", "routes": ["(unclosed"] } } } }"#,
+        r#"{ "repositories": { "law-html": { "custom": { "serve": "latest", "routes": [".*"] } } } }"#,
+    ] {
+        let archive_path = common::initialize_archive_without_bare(ArchiveType::Multihost(
+            MultihostConfig::Public,
+        ))
+        .unwrap();
+        archive_testtools::write_to_file(
+            &archive_path.path().join("fonds_2/law"),
+            repositories.to_owned(),
+            "repositories.json".to_owned(),
+        )
+        .unwrap();
+        utils::make_all_git_repos_bare_recursive(&archive_path).unwrap();
+        let app = common::initialize_app(archive_path.path()).await;
+
+        let req = test::TestRequest::get()
+            .insert_header(("X-Current-Documents-Guard", "fonds_1/law"))
+            .uri("/a/b/c.html")
+            .to_request();
+        let actual = test::call_service(&app, req).await.status();
+        let expected = StatusCode::OK;
+        assert_eq!(actual, expected, "repositories.json {repositories}");
+    }
+}
