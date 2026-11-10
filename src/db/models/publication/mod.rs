@@ -13,6 +13,14 @@ pub trait Manager {
         &self,
         fonds: &str,
     ) -> anyhow::Result<Vec<Publication>>;
+    /// Find the last non-revoked publication for a given fonds.
+    async fn find_last_inserted(&self, fonds: &str) -> anyhow::Result<Option<Publication>>;
+    /// Find a non-revoked publication by name and fonds.
+    async fn find_by_name_and_fonds(
+        &self,
+        name: &str,
+        fonds: &str,
+    ) -> anyhow::Result<Option<Publication>>;
 }
 
 /// Trait for managing transactions on publications.

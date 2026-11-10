@@ -38,7 +38,7 @@ use crate::{
             data_repo_commits::{self},
             publication::{self, Publication},
         },
-        DatabaseTransaction, Tx as _,
+        DatabaseConnection,
     },
     utils::{git::Repo, http::get_contenttype, paths::clean_path},
 };
@@ -63,14 +63,6 @@ pub async fn date(
     data: web::Data<AppState>,
     params: web::Path<request::Date>,
 ) -> impl Responder {
-    let tx_res = data.db.pool.begin().await;
-    let mut tx = match tx_res {
-        Ok(tx_inner) => DatabaseTransaction { tx: tx_inner },
-        Err(err) => {
-            tracing::error!(error = %err, "Couldn't initialize Database Transaction");
-            return HttpResponse::NotFound().body("");
-        }
-    };
     // get publication and repo name
     let auth_fonds_name = match get_fonds_from_request(&req, &data.archive) {
         Ok(rn) => rn,
@@ -79,8 +71,12 @@ pub async fn date(
             return HttpResponse::NotFound().body("");
         }
     };
+    // Each read below is its own autocommit query, so a pooled connection is held for a single
+    // round trip rather than the whole request. They are therefore not one snapshot, which is
+    // fine here: `taf-server update` only appends, so a read that straddles it sees the old or
+    // the new rows, never a partially-rewritten state.
     let publication = match get_publication_by_name_or_latest(
-        &mut tx,
+        &data.db,
         &auth_fonds_name,
         params.pub_name.as_deref(),
     )
@@ -105,7 +101,7 @@ pub async fn date(
     };
 
     let commit = match get_commit(
-        &mut tx,
+        &data.db,
         publication.id.as_str(),
         params.version_date.clone().unwrap_or_default().as_str(),
     )
@@ -123,23 +119,31 @@ pub async fn date(
         }
     };
 
-    let latest_publication_res = get_publication(&mut tx, &auth_fonds_name).await;
-    if let Err(err) = tx.commit().await {
-        tracing::error!(error = %err, "Couldn't close Database Transaction");
-        return HttpResponse::NotFound().body("");
-    }
-
     let doc_path = params.path.as_deref().unwrap_or("");
-    let (blob, content_type) = match get_document(
-        &data.archive.path,
-        &html_repo_name,
-        doc_path,
-        commit.as_str(),
-    ) {
-        Ok(val) => val,
-        Err(err) => {
+    let archive_path = data.archive.path.clone();
+    let html_repo_name_owned = html_repo_name.clone();
+    let doc_path_owned = doc_path.to_owned();
+    let commit_owned = commit.clone();
+    // Run the git2-rs blob lookup (blocking disk I/O) on actix's blocking thread pool so it
+    // doesn't stall this worker's async executor thread while it runs.
+    let (blob, content_type) = match web::block(move || {
+        get_document(
+            &archive_path,
+            &html_repo_name_owned,
+            &doc_path_owned,
+            &commit_owned,
+        )
+    })
+    .await
+    {
+        Ok(Ok(val)) => val,
+        Ok(Err(err)) => {
             tracing::error!(error = %err, "Couldn't find file: repo_name: {html_repo_name} | doc_path: {doc_path}| commit {commit}");
             return HttpResponse::NotFound().body("");
+        }
+        Err(err) => {
+            tracing::error!(error = %err, "Blocking task for git blob lookup failed: repo_name: {html_repo_name} | doc_path: {doc_path}| commit {commit}");
+            return HttpResponse::InternalServerError().body("");
         }
     };
     let doc_str = match str::from_utf8(&blob.content) {
@@ -189,7 +193,7 @@ pub async fn date(
         }
 
         // Outdated publication notification: shown when a newer publication exists
-        match latest_publication_res {
+        match get_publication(&data.db, &auth_fonds_name).await {
             Ok(latest_publication) => {
                 if publication.name != latest_publication.name {
                     let current_date_str = current_date.as_deref().unwrap_or_default();
@@ -257,7 +261,7 @@ pub fn get_html_repo(data: &web::Data<AppState>, repo_name: &str) -> anyhow::Res
 ///
 /// # Arguments
 ///
-/// * `tx` - A mutable reference to the `DatabaseTransaction`.
+/// * `db` - A reference to the `DatabaseConnection`.
 /// * `publication_id` - The ID of the publication to query.
 /// * `version_date` - The version date of the publication, as a string.
 ///
@@ -269,13 +273,12 @@ pub fn get_html_repo(data: &web::Data<AppState>, repo_name: &str) -> anyhow::Res
 ///
 /// Returns an error if the database query fails or the commit cannot be found.
 pub async fn get_commit(
-    tx: &mut DatabaseTransaction,
+    db: &DatabaseConnection,
     publication_id: &str,
     version_date: &str,
 ) -> anyhow::Result<String> {
-    //
-    let commit = data_repo_commits::TxManager::find_commit_by_pub_id_and_version_date(
-        tx,
+    let commit = data_repo_commits::Manager::find_commit_by_pub_id_and_version_date(
+        db,
         publication_id,
         version_date,
     )
@@ -324,18 +327,17 @@ pub fn get_document(
 ///
 /// # Arguments
 ///
-/// * `tx` - Active database transaction
+/// * `db` - Database connection
 /// * `fonds_name` - Publication (fonds) identifier
 ///
 /// # Errors
 ///
 /// Returns an error if the database query fails or the publication cannot be found.
 pub async fn get_publication(
-    tx: &mut DatabaseTransaction,
+    db: &DatabaseConnection,
     fonds_name: &str,
 ) -> anyhow::Result<Publication> {
-    let Some(publication) = publication::TxManager::find_last_inserted(tx, fonds_name).await?
-    else {
+    let Some(publication) = publication::Manager::find_last_inserted(db, fonds_name).await? else {
         return Err(anyhow!("No publication found for {fonds_name}"));
     };
 
@@ -350,7 +352,7 @@ pub async fn get_publication(
 ///
 /// # Arguments
 ///
-/// * `tx` - Active database transaction
+/// * `db` - Database connection
 /// * `fonds_name` - Publication (fonds) identifier
 /// * `pub_name` - Optional publication name to look up first
 ///
@@ -358,17 +360,17 @@ pub async fn get_publication(
 ///
 /// Returns an error if the database query fails or no publication can be found.
 pub async fn get_publication_by_name_or_latest(
-    tx: &mut DatabaseTransaction,
+    db: &DatabaseConnection,
     fonds_name: &str,
     pub_name: Option<&str>,
 ) -> anyhow::Result<Publication> {
     if let Some(name) = pub_name {
         if let Some(publication) =
-            publication::TxManager::find_by_name_and_fonds(tx, name, fonds_name).await?
+            publication::Manager::find_by_name_and_fonds(db, name, fonds_name).await?
         {
             return Ok(publication);
         }
         tracing::info!("Couldn't find publication for pub_name: {:?})", pub_name);
     }
-    get_publication(tx, fonds_name).await
+    get_publication(db, fonds_name).await
 }

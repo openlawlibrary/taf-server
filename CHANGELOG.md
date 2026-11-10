@@ -16,9 +16,12 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 
 ### Fixed
 
+- Serve the `_date` endpoint's database reads as individual pooled queries instead of holding one shared transaction for the whole request, and run the git blob lookup on the blocking thread pool so it no longer stalls the async executor ([#141])
+
 ### Removed
 
 [#132]: https://github.com/openlawlibrary/taf-server/pull/132
+[#141]: https://github.com/openlawlibrary/taf-server/pull/141
 
 ## [v0.7.1]
 

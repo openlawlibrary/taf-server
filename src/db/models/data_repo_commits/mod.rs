@@ -4,6 +4,17 @@ use sqlx::{any::AnyRow, FromRow, Row as _};
 
 pub mod manager;
 
+/// Trait for pool-based (non-transactional) reads of data repo commits.
+#[async_trait]
+pub trait Manager {
+    /// Find the latest commit for a publication, constrained by a valid ISO version date.
+    async fn find_commit_by_pub_id_and_version_date(
+        &self,
+        publication_id: &str,
+        version_date: &str,
+    ) -> anyhow::Result<DataRepoCommits>;
+}
+
 /// Trait for managing transactional data repo commits.
 #[async_trait]
 pub trait TxManager {
@@ -23,12 +34,6 @@ pub trait TxManager {
     ) -> anyhow::Result<Option<String>>;
     /// Insert a bulk of data repo commits.
     async fn insert_bulk(&mut self, data_repo_commits: Vec<DataRepoCommits>) -> anyhow::Result<()>;
-    /// Find the latest commit for a publication, constrained by a valid ISO version date.
-    async fn find_commit_by_pub_id_and_version_date(
-        &mut self,
-        publication_id: &str,
-        version_date: &str,
-    ) -> anyhow::Result<DataRepoCommits>;
 }
 
 #[derive(Debug, Deserialize, Serialize)]

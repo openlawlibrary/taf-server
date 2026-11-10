@@ -32,6 +32,49 @@ impl super::Manager for DatabaseConnection {
         };
         Ok(rows)
     }
+
+    /// Find the last non-revoked publication by `fonds`.
+    ///
+    /// # Errors
+    /// Errors if the connection cannot be acquired or the query fails.
+    async fn find_last_inserted(&self, fonds: &str) -> anyhow::Result<Option<Publication>> {
+        let statement = "
+            SELECT *
+            FROM publication
+            WHERE revoked = 0 AND fonds = $1
+            ORDER BY date DESC
+            LIMIT 1
+        ";
+        let mut connection = self.pool.acquire().await?;
+        let row = sqlx::query_as::<_, Publication>(statement)
+            .bind(fonds)
+            .fetch_optional(&mut *connection)
+            .await?;
+        Ok(row)
+    }
+
+    /// Find a non-revoked publication by `name` and `fonds`.
+    ///
+    /// # Errors
+    /// Errors if the connection cannot be acquired or the query fails.
+    async fn find_by_name_and_fonds(
+        &self,
+        name: &str,
+        fonds: &str,
+    ) -> anyhow::Result<Option<Publication>> {
+        let statement = "
+            SELECT *
+            FROM publication
+            WHERE name = $1 AND fonds = $2 AND revoked = 0
+        ";
+        let mut connection = self.pool.acquire().await?;
+        let row = sqlx::query_as::<_, Publication>(statement)
+            .bind(name)
+            .bind(fonds)
+            .fetch_optional(&mut *connection)
+            .await?;
+        Ok(row)
+    }
 }
 
 #[async_trait]
