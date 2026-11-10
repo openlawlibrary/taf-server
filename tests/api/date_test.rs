@@ -146,3 +146,24 @@ async fn test_date_where_publication_is_unknown_expect_redirect_to_latest() {
     );
     assert_eq!(actual, expected);
 }
+
+#[actix_web::test]
+async fn test_date_where_commit_has_no_codified_date_expect_found() {
+    let archive_path = initialize_date_archive().await;
+    let db = common::get_db(archive_path.path()).await;
+    sqlx::query(
+        "INSERT INTO data_repo_commits (commit_hash, codified_date, build_date, repo_type, auth_commit_hash, auth_commit_timestamp, publication_id) SELECT commit_hash, NULL, NULL, 'html', 'auth-undated', auth_commit_timestamp, ? FROM data_repo_commits",
+    )
+    .bind(LATEST_PUB)
+    .execute(&db.pool)
+    .await
+    .unwrap();
+
+    let (actual, _, _) = get_date(
+        archive_path.path(),
+        "/_publication/2024-01-01/_date/2020-01-01/doc",
+    )
+    .await;
+    let expected = StatusCode::OK;
+    assert_eq!(actual, expected);
+}

@@ -92,8 +92,7 @@ impl super::TxManager for DatabaseTransaction {
     /// the provided date.
     /// If `version_date` is not a valid ISO date, the latest available commit
     /// for the publication is returned regardless of date.
-    /// Commits recorded without a `codified_date` are used only when no dated
-    /// commit matches, so a date before the first dated commit finds nothing.
+    /// If none matches, the latest commit without a `codified_date` is returned.
     ///
     /// # Errors
     /// Returns an error if the commit cannot be retrieved from the database
