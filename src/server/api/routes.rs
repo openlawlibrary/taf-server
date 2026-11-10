@@ -459,7 +459,10 @@ fn register_dependent_routes(
 ) -> anyhow::Result<()> {
     let sorted_repositories = repositories.get_sorted();
     for scope in repositories.scopes.iter().flat_map(|scopes| scopes.iter()) {
-        let scope_str = format!("/{{prefix:{}}}", scope.as_str());
+        if scope.starts_with('_') {
+            continue;
+        }
+        let scope_str = format!("/{{prefix:{}}}", regex::escape(scope));
         let mut actix_scope = web::scope(scope_str.as_str());
         for repository in &sorted_repositories {
             let custom = &repository.custom;
