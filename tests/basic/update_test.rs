@@ -150,6 +150,28 @@ fn test_update_where_publication_rdf_has_doctype_expect_error_and_publication_sk
 }
 
 #[test]
+fn test_update_where_same_date_republication_added_expect_full_history() {
+    let td = new_archive();
+    let dates = ["2021-01-28", "2021-02-16", "2021-04-06"];
+    commit_publication(&td, "2021-04-23", &dates);
+    assert!(run_update(&td));
+    commit_publication(&td, "2021-04-23-01", &dates);
+    assert!(run_update(&td));
+    assert_eq!(publication_count(&td, "2021-04-23"), 0);
+    assert_eq!(version_count(&td, "2021-04-23-01"), 3);
+}
+
+#[test]
+fn test_update_where_backdated_publication_added_expect_ingested() {
+    let td = new_archive();
+    commit_publication(&td, "2021-04-23", &["2021-01-28"]);
+    assert!(run_update(&td));
+    commit_publication(&td, "2021-03-01", &["2021-01-28"]);
+    assert!(run_update(&td));
+    assert_eq!(publication_count(&td, "2021-03-01"), 1);
+}
+
+#[test]
 fn test_update_where_publication_removed_and_revoked_one_remains_expect_rebuild() {
     let td = new_archive();
     commit_publication(&td, "2021-04-23", &["2021-01-28"]);

@@ -288,23 +288,16 @@ async fn load_delta_from_publications(
     let tree = head_commit.tree()?;
     let publications_dir_entry = tree.get_path(&PathBuf::from("_publication"))?;
     let publications_subtree = rdf_repo.repo.find_tree(publications_dir_entry.id())?;
-    let mut last_inserted_date: Option<NaiveDate> = None;
-    let last_inserted_pub_date = if let Some(last_inserted_pub) = last_inserted_publication.as_ref()
-    {
-        last_inserted_date =
-            publication_version::TxManager::find_last_inserted_date_by_publication_id(
-                tx,
-                &last_inserted_pub.id,
-            )
-            .await?
-            .map(|pv| {
-                NaiveDate::parse_from_str(&pv.version, "%Y-%m-%d").context("Could not parse date")
-            })
-            .and_then(Result::ok);
-        Some(NaiveDate::parse_from_str(
-            &last_inserted_pub.date,
-            "%Y-%m-%d",
-        )?)
+    let last_inserted_date = if let Some(last_inserted_pub) = last_inserted_publication.as_ref() {
+        publication_version::TxManager::find_last_inserted_date_by_publication_id(
+            tx,
+            &last_inserted_pub.id,
+        )
+        .await?
+        .map(|pv| {
+            NaiveDate::parse_from_str(&pv.version, "%Y-%m-%d").context("Could not parse date")
+        })
+        .and_then(Result::ok)
     } else {
         None
     };
@@ -330,11 +323,13 @@ async fn load_delta_from_publications(
             .ok();
         // continue from last inserted publication, since that publication can contain
         // new changes (versions) that are not in db
-        if let Some(last_inserted_publication_date) = last_inserted_pub_date {
-            if pub_date < last_inserted_publication_date {
-                // skip past publications since they are already in db
-                continue;
-            }
+        let is_last_inserted = last_inserted_publication
+            .as_ref()
+            .is_some_and(|last_inserted_pub| last_inserted_pub.name == pub_name);
+        if !is_last_inserted
+            && publication::TxManager::exists_by_name_and_fonds(tx, &pub_name, fonds).await?
+        {
+            continue;
         }
         tracing::info!("[{fonds}] | Publication: {pub_name}");
         publication_tree.walk(TreeWalkMode::PreOrder, |_, entry| {
@@ -409,9 +404,8 @@ async fn load_delta_from_publications(
                 );
             continue;
         };
-        load_delta_for_publication(tx, publication, &pub_graph, last_inserted_date).await?;
-        // reset last inserted date for next publication
-        last_inserted_date = None;
+        let resume_date = last_inserted_date.filter(|_| is_last_inserted);
+        load_delta_for_publication(tx, publication, &pub_graph, resume_date).await?;
     }
     Ok(())
 }

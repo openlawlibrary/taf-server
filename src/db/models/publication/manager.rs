@@ -174,6 +174,20 @@ impl super::TxManager for DatabaseTransaction {
         Ok(row)
     }
 
+    /// Check whether a publication, revoked or not, is stored for a fonds.
+    ///
+    /// # Errors
+    /// Errors if can't establish a connection to the database.
+    async fn exists_by_name_and_fonds(&mut self, name: &str, fonds: &str) -> anyhow::Result<bool> {
+        let statement = "SELECT EXISTS(SELECT 1 FROM publication WHERE name = $1 AND fonds = $2)";
+        let exists: i64 = sqlx::query_scalar(statement)
+            .bind(name)
+            .bind(fonds)
+            .fetch_one(&mut *self.tx)
+            .await?;
+        Ok(exists != 0)
+    }
+
     /// Filter publications by `name` and `fonds_id` which is not revoked.
     ///
     /// # Errors

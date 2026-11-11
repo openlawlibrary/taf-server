@@ -55,6 +55,8 @@ pub trait TxManager {
         name: &str,
         fonds: &str,
     ) -> anyhow::Result<Option<Publication>>;
+    /// Check whether a publication, revoked or not, is stored for a fonds.
+    async fn exists_by_name_and_fonds(&mut self, name: &str, fonds: &str) -> anyhow::Result<bool>;
     /// Find the first publication by name and fonds that is not revoked.
     async fn find_first_by_name_and_fonds_non_revoked(
         &mut self,
