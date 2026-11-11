@@ -67,11 +67,12 @@ pub async fn date(
     data: web::Data<AppState>,
     params: web::Path<request::Date>,
 ) -> impl Responder {
-    if params
+    if let Some(version_date) = params
         .version_date
         .as_deref()
-        .is_some_and(|version_date| !is_canonical_date(version_date))
+        .filter(|version_date| !is_canonical_date(version_date))
     {
+        tracing::error!(version_date, "Version date is not a YYYY-MM-DD date");
         return HttpResponse::BadRequest().body("");
     }
     let tx_res = data.db.pool.begin().await;
