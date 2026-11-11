@@ -4,9 +4,69 @@ use async_trait::async_trait;
 use chrono::NaiveDate;
 use sqlx::QueryBuilder;
 
-use crate::db::{models::BATCH_SIZE, DatabaseTransaction};
+use crate::db::{models::BATCH_SIZE, DatabaseConnection, DatabaseTransaction};
 
 use super::DataRepoCommits;
+
+#[async_trait]
+impl super::Manager for DatabaseConnection {
+    /// Finds the most recent authentication commit for a given publication
+    /// that is valid for the specified version date.
+    ///
+    /// If `version_date` is a valid ISO date (`YYYY-MM-DD`), the commit returned
+    /// is the latest one whose `codified_date` is **less than or equal to**
+    /// the provided date.
+    /// If `version_date` is not a valid ISO date, the latest available commit
+    /// for the publication is returned regardless of date.
+    ///
+    /// # Errors
+    /// Returns an error if the commit cannot be retrieved from the database
+    /// or if the query execution fails.
+    async fn find_commit_by_pub_id_and_version_date(
+        &self,
+        publication_id: &str,
+        version_date: &str,
+    ) -> anyhow::Result<DataRepoCommits> {
+        let mut connection = self.pool.acquire().await?;
+        let is_iso = NaiveDate::parse_from_str(version_date, "%Y-%m-%d").is_ok();
+        let query = if is_iso {
+            "
+            SELECT *
+            FROM data_repo_commits
+            WHERE publication_id = $1
+            AND codified_date <= $2
+            ORDER BY codified_date DESC, auth_commit_timestamp DESC
+            LIMIT 1
+            "
+        } else {
+            "
+            SELECT *
+            FROM data_repo_commits
+            WHERE publication_id = $1
+            ORDER BY codified_date DESC, auth_commit_timestamp DESC
+            LIMIT 1
+            "
+        };
+
+        let commit: Option<DataRepoCommits> = if is_iso {
+            sqlx::query_as::<_, DataRepoCommits>(query)
+                .bind(publication_id)
+                .bind(version_date)
+                .fetch_optional(&mut *connection)
+                .await?
+        } else {
+            sqlx::query_as::<_, DataRepoCommits>(query)
+                .bind(publication_id)
+                .fetch_optional(&mut *connection)
+                .await?
+        };
+
+        commit.ok_or_else(|| {
+            anyhow!(
+                "No commit found for publication_id={publication_id} and version_date={version_date}")
+        })
+    }
+}
 
 #[async_trait]
 impl super::TxManager for DatabaseTransaction {
@@ -83,60 +143,5 @@ impl super::TxManager for DatabaseTransaction {
             query_builder.reset();
         }
         Ok(())
-    }
-    /// Finds the most recent authentication commit for a given publication
-    /// that is valid for the specified version date.
-    ///
-    /// If `version_date` is a valid ISO date (`YYYY-MM-DD`), the commit returned
-    /// is the latest one whose `codified_date` is **less than or equal to**
-    /// the provided date.
-    /// If `version_date` is not a valid ISO date, the latest available commit
-    /// for the publication is returned regardless of date.
-    ///
-    /// # Errors
-    /// Returns an error if the commit cannot be retrieved from the database
-    /// or if the query execution fails.
-    async fn find_commit_by_pub_id_and_version_date(
-        &mut self,
-        publication_id: &str,
-        version_date: &str,
-    ) -> anyhow::Result<DataRepoCommits> {
-        let is_iso = NaiveDate::parse_from_str(version_date, "%Y-%m-%d").is_ok();
-        let query = if is_iso {
-            "
-            SELECT *
-            FROM data_repo_commits
-            WHERE publication_id = $1
-            AND codified_date <= $2
-            ORDER BY codified_date DESC, auth_commit_timestamp DESC
-            LIMIT 1
-            "
-        } else {
-            "
-            SELECT *
-            FROM data_repo_commits
-            WHERE publication_id = $1
-            ORDER BY codified_date DESC, auth_commit_timestamp DESC
-            LIMIT 1
-            "
-        };
-
-        let commit: Option<DataRepoCommits> = if is_iso {
-            sqlx::query_as::<_, DataRepoCommits>(query)
-                .bind(publication_id)
-                .bind(version_date)
-                .fetch_optional(&mut *self.tx)
-                .await?
-        } else {
-            sqlx::query_as::<_, DataRepoCommits>(query)
-                .bind(publication_id)
-                .fetch_optional(&mut *self.tx)
-                .await?
-        };
-
-        commit.ok_or_else(|| {
-            anyhow!(
-                "No commit found for publication_id={publication_id} and version_date={version_date}")
-        })
     }
 }
