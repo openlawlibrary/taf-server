@@ -92,7 +92,6 @@ impl super::TxManager for DatabaseTransaction {
     /// the provided date.
     /// If `version_date` is not a valid ISO date, the latest available commit
     /// for the publication is returned regardless of date.
-    /// If none matches, the latest commit without a `codified_date` is returned.
     ///
     /// # Errors
     /// Returns an error if the commit cannot be retrieved from the database
@@ -122,7 +121,7 @@ impl super::TxManager for DatabaseTransaction {
             "
         };
 
-        let mut commit: Option<DataRepoCommits> = if is_iso {
+        let commit: Option<DataRepoCommits> = if is_iso {
             sqlx::query_as::<_, DataRepoCommits>(query)
                 .bind(publication_id)
                 .bind(version_date)
@@ -134,22 +133,6 @@ impl super::TxManager for DatabaseTransaction {
                 .fetch_optional(&mut *self.tx)
                 .await?
         };
-
-        if commit.is_none() {
-            let fallback_query = "
-                SELECT *
-                FROM data_repo_commits
-                WHERE publication_id = $1
-                AND codified_date IS NULL
-                ORDER BY build_date DESC, auth_commit_timestamp DESC
-                LIMIT 1
-            ";
-
-            commit = sqlx::query_as::<_, DataRepoCommits>(fallback_query)
-                .bind(publication_id)
-                .fetch_optional(&mut *self.tx)
-                .await?;
-        }
 
         commit.ok_or_else(|| {
             anyhow!(
