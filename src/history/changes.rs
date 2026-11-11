@@ -40,12 +40,9 @@ use anyhow::Context as _;
 use chrono::DateTime;
 use git2::{TreeWalkMode, TreeWalkResult};
 use sophia::api::ns::rdfs;
-use sophia::api::prelude::*;
-use sophia::xml::parser;
 use sqlx::types::chrono::NaiveDate;
 use std::{
     borrow::ToOwned,
-    io::{self, BufReader},
     path::{Path, PathBuf},
     result::Result,
 };
@@ -319,9 +316,7 @@ async fn load_delta_from_publications(
             .context("Expected a tree but got something else")?;
         let index_rdf = publication_tree.get_path(&PathBuf::from("index.rdf"))?;
         let blob = rdf_repo.repo.find_blob(index_rdf.id())?;
-        let data = blob.content();
-        let reader = io::BufReader::new(data);
-        parser::parse_bufread(reader).add_to_graph(&mut pub_graph.fast_graph)?;
+        pub_graph.add_rdf_xml(blob.content())?;
         let pub_label = pub_graph.literal_from_triple_matching(None, Some(rdfs::label), None)?;
         let pub_name = pub_label
             .strip_prefix("Publication ")
@@ -347,10 +342,7 @@ async fn load_delta_from_publications(
             if path_name.contains(".rdf") {
                 match rdf_repo.repo.find_blob(entry.id()) {
                     Ok(current_blob) => {
-                        let current_content = current_blob.content();
-                        if let Err(err) = parser::parse_bufread(BufReader::new(current_content))
-                            .add_to_graph(&mut pub_graph.fast_graph)
-                        {
+                        if let Err(err) = pub_graph.add_rdf_xml(current_blob.content()) {
                             tracing::error!(
                                 "Error adding content to graph for entry {path_name}: {err:?}"
                             );
