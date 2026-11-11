@@ -77,8 +77,8 @@ pub trait TxManager {
         date: String,
         fonds: String,
     ) -> anyhow::Result<Vec<Publication>>;
-    /// Count the number of non-revoked publications for a given fonds.
-    async fn count_non_revoked(&mut self, fonds: &str) -> anyhow::Result<usize>;
+    /// Find the names of the non-revoked publications for a given fonds.
+    async fn find_non_revoked_names(&mut self, fonds: &str) -> anyhow::Result<Vec<String>>;
     /// Count the non-revoked publications for a given fonds that carry no
     /// `html_data_repo_name`.
     async fn count_non_revoked_missing_html_data_repo_name(

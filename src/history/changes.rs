@@ -726,19 +726,19 @@ async fn revoke_same_date_publications(
 ///
 /// Three checks are performed:
 ///
-/// Publication count: the number of entries in the RDF repository's
-/// `_publication/` directory at HEAD must be ≥ the number of non-revoked publications
-/// stored in the database.  A lower count indicates that the RDF repository was rolled
-/// back or force-pushed and publications were lost.
+/// Publication names: every non-revoked publication stored in the database must
+/// still have a directory in the RDF repository's `_publication/` at HEAD.  A missing
+/// one indicates that the RDF repository was rolled back or force-pushed, or that the
+/// publication was removed.
 ///
 /// `html_data_repo_name` completeness: when the fonds has a current (non-archived)
 /// HTML repository, every non-revoked publication must record one.  Rows predating
 /// the column cannot be filled in by an incremental run, so a rebuild is required.
 ///
-/// Authentication commit existence: for each historical HTML data
+/// Authentication commit ancestry: for each historical HTML data
 /// repository, the most-recently-recorded `auth_commit_hash` in `data_repo_commits`
-/// must resolve to a real commit in the auth repository.  If it does not, the auth
-/// repository was force-pushed past that commit.
+/// must be the auth repository's HEAD or one of its ancestors.  If it is not, the auth
+/// repository was reset or force-pushed past that commit.
 async fn is_fonds_inconsistent(
     tx: &mut DatabaseTransaction,
     fonds_name: &str,
@@ -747,8 +747,8 @@ async fn is_fonds_inconsistent(
     data_repos: &[&Repository],
     current_html_repo_name: Option<&str>,
 ) -> anyhow::Result<bool> {
-    let db_pub_count = publication::TxManager::count_non_revoked(tx, fonds_name).await?;
-    if db_pub_count == 0 {
+    let db_pub_names = publication::TxManager::find_non_revoked_names(tx, fonds_name).await?;
+    if db_pub_names.is_empty() {
         // Fresh fonds, nothing to be inconsistent with.
         return Ok(false);
     }
@@ -777,21 +777,24 @@ async fn is_fonds_inconsistent(
         }
     }
 
-    // Count publications in _publication/ at HEAD vs non-revoked in DB.
     let head_commit = rdf_repo.repo.head()?.peel_to_commit()?;
     let tree = head_commit.tree()?;
     if let Ok(publications_dir_entry) = tree.get_path(&PathBuf::from("_publication")) {
         let publications_subtree = rdf_repo.repo.find_tree(publications_dir_entry.id())?;
-        let rdf_pub_count = publications_subtree.len();
-        if rdf_pub_count < db_pub_count {
+        if let Some(missing) = db_pub_names
+            .iter()
+            .find(|name| publications_subtree.get_name(name).is_none())
+        {
             tracing::warn!(
-                "[{fonds_name}] | Inconsistency detected: RDF repository has {rdf_pub_count} \
-                 publication(s) at HEAD but the database has {db_pub_count} non-revoked \
-                 publication(s). The RDF repository may have been force-pushed or rolled back."
+                "[{fonds_name}] | Inconsistency detected: publication {missing} is in the \
+                 database but not in the RDF repository at HEAD. The RDF repository may have \
+                 been force-pushed or rolled back."
             );
             return Ok(true);
         }
     }
+
+    let auth_head = fonds.auth_repo.repo.head()?.peel_to_commit()?.id();
 
     // Most-recent auth_commit_hash for each data repo must exist in the auth repo.
     for data_repo in data_repos {
@@ -814,11 +817,11 @@ async fn is_fonds_inconsistent(
                 return Ok(true);
             }
         };
-        if fonds.auth_repo.repo.find_commit(oid).is_err() {
+        if fonds.auth_repo.repo.merge_base(auth_head, oid).ok() != Some(oid) {
             tracing::warn!(
                 "[{fonds_name}] | Inconsistency detected: auth commit '{last_auth_commit}' \
-                 for data repo '{}' is not present in the auth repository. \
-                 The auth repository may have been force-pushed.",
+                 for data repo '{}' is not reachable from the auth repository's HEAD. \
+                 The auth repository may have been reset or force-pushed.",
                 data_repo.name
             );
             return Ok(true);

@@ -148,3 +148,34 @@ fn test_update_where_publication_rdf_has_doctype_expect_error_and_publication_sk
     assert!(!run_update(&td));
     assert_eq!(publication_count(&td, "2021-04-23"), 0);
 }
+
+#[test]
+fn test_update_where_publication_removed_and_revoked_one_remains_expect_rebuild() {
+    let td = new_archive();
+    commit_publication(&td, "2021-04-23", &["2021-01-28"]);
+    commit_publication(&td, "2021-04-23-01", &["2021-01-28"]);
+    commit_publication(&td, "2025-02-20", &["2025-02-01"]);
+    assert!(run_update(&td));
+    assert_eq!(publication_count(&td, "2025-02-20"), 1);
+    commit_files(&td, RDF, &[("_publication/2025-02-20/index.rdf", None)]);
+    assert!(run_update(&td));
+    assert_eq!(publication_count(&td, "2025-02-20"), 0);
+}
+
+#[test]
+fn test_update_where_auth_repo_reset_to_earlier_commit_expect_rebuild() {
+    let td = new_archive();
+    make_html_historical(&td);
+    commit_publication(&td, "2021-04-23", &[]);
+    let first = commit_html_build(&td, "2021-01-28");
+    assert!(run_update(&td));
+    let second = commit_html_build(&td, "2021-08-03");
+    assert!(run_update(&td));
+    let auth = Repository::open(td.path().join(AUTH)).unwrap();
+    let head = auth.head().unwrap().name().unwrap().to_owned();
+    auth.reference(&head, first, true, "reset").unwrap();
+    assert!(run_update(&td));
+    let rows = "SELECT COUNT(*) FROM data_repo_commits WHERE auth_commit_hash = ?";
+    assert_eq!(count(&td, rows, &second.to_string()), 0);
+    assert!(count(&td, rows, &first.to_string()) >= 1);
+}

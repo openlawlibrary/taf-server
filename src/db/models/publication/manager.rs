@@ -221,21 +221,21 @@ impl super::TxManager for DatabaseTransaction {
         Ok(())
     }
 
-    /// Count the number of non-revoked publications for a given fonds.
+    /// Find the names of the non-revoked publications for a given fonds.
     ///
     /// # Errors
     /// Errors if can't establish a connection to the database.
-    async fn count_non_revoked(&mut self, fonds: &str) -> anyhow::Result<usize> {
+    async fn find_non_revoked_names(&mut self, fonds: &str) -> anyhow::Result<Vec<String>> {
         let statement = "
-            SELECT COUNT(*) as count
+            SELECT name
             FROM publication
             WHERE revoked = 0 AND fonds = $1
         ";
-        let row: (i64,) = sqlx::query_as(statement)
+        let names = sqlx::query_scalar(statement)
             .bind(fonds)
-            .fetch_one(&mut *self.tx)
+            .fetch_all(&mut *self.tx)
             .await?;
-        Ok(usize::try_from(row.0).unwrap_or(0))
+        Ok(names)
     }
 
     /// Count the non-revoked publications for a given fonds that carry no
