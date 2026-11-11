@@ -7,6 +7,9 @@ use std::io;
 /// Collection of possible HTTP errors
 #[derive(Debug, Display, Error)]
 pub enum HTTPError {
+    #[display("400 Bad Request")]
+    /// 400
+    BadRequest,
     #[display("404 Not Found")]
     /// 404
     NotFound,

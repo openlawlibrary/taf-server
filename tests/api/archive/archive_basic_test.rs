@@ -1,7 +1,11 @@
 use std::path::PathBuf;
 
 use actix_http::header::IF_NONE_MATCH;
-use actix_web::test;
+use actix_http::Request;
+use actix_service::Service;
+use actix_web::body::MessageBody;
+use actix_web::dev::ServiceResponse;
+use actix_web::{test, Error};
 use taf_server::server::headers::HTTP_E_TAG;
 
 use crate::archive_testtools::config::{ArchiveType, Jurisdiction};
@@ -481,6 +485,94 @@ async fn test_archive_api_where_branch_is_commit_sha_expect_resolved_content() {
         common::blob_to_string(actual.to_vec()).starts_with(expected),
         "doesn't start with {expected}"
     );
+}
+
+async fn get_archive_status(
+    app: &impl Service<Request, Response = ServiceResponse<impl MessageBody>, Error = Error>,
+    commitish: &str,
+    path: &str,
+) -> StatusCode {
+    let req = test::TestRequest::get()
+        .uri(&format!(
+            "/_archive/test_org/law-html?commitish={commitish}&path={path}"
+        ))
+        .to_request();
+    test::call_service(app, req).await.status()
+}
+
+#[actix_web::test]
+async fn test_archive_api_where_commit_is_not_on_local_branch_expect_not_found() {
+    let archive_path =
+        common::initialize_archive_without_bare(ArchiveType::Basic(Jurisdiction::Single)).unwrap();
+    let mut path = archive_path.path().to_path_buf();
+    path.push("test_org");
+    let git_repo = get_repository(&path, "law-html");
+    path.push("law-html");
+    let head = git_repo.head().unwrap();
+    let branch_ref = head.name().unwrap().to_owned();
+    let parent = head.peel_to_commit().unwrap().id();
+    let _ = git_repo.add_file(&path, "remote.txt", "Remote content");
+    let commit = git_repo.commit(None, "Adding remote data").unwrap();
+    git_repo
+        .reference(&branch_ref, parent, true, "move branch back")
+        .unwrap();
+    git_repo
+        .reference("refs/remotes/origin/main", commit, true, "remote branch")
+        .unwrap();
+    let app = common::initialize_app(archive_path.path()).await;
+
+    let commit = commit.to_string();
+    for commitish in [
+        commit.as_str(),
+        &commit[..7],
+        "origin/main",
+        "refs/remotes/origin/main",
+    ] {
+        let actual = get_archive_status(&app, commitish, "/remote.txt").await;
+        let expected = StatusCode::NOT_FOUND;
+        assert_eq!(actual, expected, "commitish {commitish}");
+    }
+}
+
+#[actix_web::test]
+async fn test_archive_api_where_commitish_is_revision_expression_expect_bad_request() {
+    let archive_path =
+        common::initialize_archive(ArchiveType::Basic(Jurisdiction::Single)).unwrap();
+    let app = common::initialize_app(archive_path.path()).await;
+
+    for commitish in [
+        "HEAD~0",
+        "HEAD%5E0",
+        "HEAD%40%7B0%7D",
+        ":/a",
+        "HEAD%5E%7B/a%7D",
+    ] {
+        let actual = get_archive_status(&app, commitish, "/index.html").await;
+        let expected = StatusCode::BAD_REQUEST;
+        assert_eq!(actual, expected, "commitish {commitish}");
+    }
+}
+
+#[actix_web::test]
+async fn test_archive_api_where_blob_found_expect_nosniff_and_sandbox_headers() {
+    let archive_path =
+        common::initialize_archive(ArchiveType::Basic(Jurisdiction::Single)).unwrap();
+    let app = common::initialize_app(archive_path.path()).await;
+    let req = test::TestRequest::get()
+        .uri("/_archive/test_org/law-html?path=/index.html")
+        .to_request();
+
+    let resp = test::call_service(&app, req).await;
+
+    let actual = (
+        resp.headers().get(header::X_CONTENT_TYPE_OPTIONS),
+        resp.headers().get(header::CONTENT_SECURITY_POLICY),
+    );
+    let expected = (
+        Some(&header::HeaderValue::from_static("nosniff")),
+        Some(&header::HeaderValue::from_static("sandbox")),
+    );
+    assert_eq!(actual, expected);
 }
 
 #[actix_web::test]

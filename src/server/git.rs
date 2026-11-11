@@ -1,5 +1,5 @@
 //! Legacy git microserver.
-use actix_http::header::IF_NONE_MATCH;
+use actix_http::header::{IF_NONE_MATCH, X_CONTENT_TYPE_OPTIONS};
 use actix_web::{get, route, web, App, HttpRequest, HttpResponse, HttpServer, Responder};
 use git2::{self, ErrorCode};
 use std::path::PathBuf;
@@ -8,7 +8,7 @@ use tracing_actix_web::TracingLogger;
 use super::errors::{CliError, HTTPError, TafServerError};
 use crate::server::headers;
 use crate::server::headers::etag_matches_if_none_match;
-use crate::utils::git::{Repo, GIT_REQUEST_NOT_FOUND};
+use crate::utils::git::{Repo, GIT_INVALID_REVISION, GIT_REQUEST_NOT_FOUND};
 use crate::utils::http::get_contenttype;
 use crate::{server::tracing::TafServerRootSpanBuilder, utils::paths::clean_path};
 
@@ -35,7 +35,8 @@ async fn misc(path: web::Path<String>) -> actix_web::Result<&'static str, TafSer
 
 /// Return the content in the fonds archive in the `{namespace}/{name}`
 /// repo at the `commitish` commit at the `remainder` path.
-/// Return 404 if any are not found or there are any errors.
+/// `commitish` must be `HEAD`, a local branch name or a full commit ID.
+/// Return 400 for any other `commitish`, and 404 if any are not found.
 #[route(
     "/{namespace}/{name}/{commitish}{remainder:/+([^{}]*?)?/*}",
     method = "GET",
@@ -72,6 +73,7 @@ async fn get_blob(
             }
             HttpResponse::Ok()
                 .insert_header(contenttype)
+                .insert_header((X_CONTENT_TYPE_OPTIONS, "nosniff"))
                 .insert_header((headers::HTTP_X_FILE_PATH, filepath))
                 .insert_header((headers::HTTP_E_TAG, blob_hash.to_string()))
                 .body(content)
@@ -101,6 +103,9 @@ fn blob_error_response(error: &anyhow::Error, namespace: &str, name: &str) -> Ht
         // TODO: Obviously it's better to use custom `Error` types
         _ if error.to_string() == GIT_REQUEST_NOT_FOUND => {
             HttpResponse::NotFound().body(HTTPError::NotFound.to_string())
+        }
+        _ if error.to_string() == GIT_INVALID_REVISION => {
+            HttpResponse::BadRequest().body(HTTPError::BadRequest.to_string())
         }
         _ => HttpResponse::InternalServerError().body(HTTPError::InternalServerError.to_string()),
     }

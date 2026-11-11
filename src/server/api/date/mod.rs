@@ -231,10 +231,8 @@ pub async fn date(
 ///
 /// Returns an error if the fonds cannot be found, no repositories are defined,
 /// or no HTML repository exists for the given repository name.
-#[expect(clippy::pattern_type_mismatch, reason = "..")]
 pub fn get_html_repo(data: &web::Data<AppState>, repo_name: &str) -> anyhow::Result<String> {
-    let all_fonds = data.archive.get_all_fonds();
-    let Some((_, auth_repo)) = all_fonds.iter().find(|(s_name, _)| s_name == repo_name) else {
+    let Some(auth_repo) = data.archive.fonds_map.get(repo_name) else {
         return Err(anyhow::anyhow!(
             "Repository '{repo_name}' not found in fonds"
         ));
