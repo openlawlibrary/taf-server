@@ -1,10 +1,8 @@
 //! The git module contains structs for interacting with git repositories
 //! in the Fonds Archive.
 use crate::utils::paths::clean_path;
-use anyhow::Context as _;
 use anyhow::Result;
-use git2::Oid;
-use git2::{Commit, Repository, Sort};
+use git2::{BranchType, Commit, Oid, Reference, Repository, Sort};
 use std::{
     fmt,
     path::{Path, PathBuf},
@@ -12,6 +10,49 @@ use std::{
 
 /// This is the first step towards having custom errors
 pub const GIT_REQUEST_NOT_FOUND: &str = "Git object doesn't exist";
+
+/// Error message for a revision that is not `HEAD`, a local branch name or a full commit ID.
+pub const GIT_INVALID_REVISION: &str = "Invalid Git revision";
+
+/// A revision that content can be read from.
+///
+/// Only `HEAD`, a local branch name or a full commit ID are accepted, so that
+/// requests cannot use revision syntax such as abbreviated IDs, remote-tracking
+/// refs, reflog entries, ancestry operators or commit message searches.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Revision {
+    /// The commit `HEAD` points to.
+    Head,
+    /// The tip of the local branch `refs/heads/<name>`.
+    Branch(String),
+    /// A commit given by its full object ID.
+    Commit(Oid),
+}
+
+impl Revision {
+    /// Parse `commitish` into a `Revision`.
+    ///
+    /// # Errors
+    /// Will error with [`GIT_INVALID_REVISION`] if `commitish` is not `HEAD`,
+    /// a full 40 character hex commit ID, or a valid local branch name.
+    pub fn parse(commitish: &str) -> Result<Self> {
+        if commitish == "HEAD" {
+            return Ok(Self::Head);
+        }
+        if commitish.len() == 40 && commitish.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Ok(Self::Commit(Oid::from_str(commitish)?));
+        }
+        if !commitish.is_empty() && Reference::is_valid_name(&format!("refs/heads/{commitish}")) {
+            return Ok(Self::Branch(commitish.to_owned()));
+        }
+        anyhow::bail!(GIT_INVALID_REVISION)
+    }
+}
+
+/// Check that `segment` can be used as a single directory name in the archive.
+fn is_valid_path_segment(segment: &str) -> bool {
+    !matches!(segment, "" | "." | "..") && !segment.contains(['/', '\\'])
+}
 
 /// Represents a git repository within an oll archive. includes helpers for
 /// for interacting with the Git Repo.
@@ -68,14 +109,6 @@ impl Clone for Repo {
 }
 
 impl Repo {
-    /// Find something like `abc123:/path/to/something.txt` in the Git repo
-    fn find(&self, query: &str) -> anyhow::Result<Vec<u8>> {
-        tracing::trace!(query, "Git reverse parse search");
-        let obj = self.repo.revparse_single(query)?;
-        let blob = obj.as_blob().context("Couldn't cast Git object to blob")?;
-        Ok(blob.content().to_owned())
-    }
-
     /// Do the work of looking for the requested Git object.
     ///
     ///
@@ -98,9 +131,13 @@ impl Repo {
     ///
     /// # Errors
     ///
-    /// Will return `Err` if git repository does not exist at `{org}/{name}`
-    /// in archive, or if there is something wrong with the git repository.
+    /// Will return `Err` if `org` or `name` is not a single path segment, if
+    /// git repository does not exist at `{org}/{name}` in archive, or if there
+    /// is something wrong with the git repository.
     pub fn new(archive_path: &Path, org: &str, name: &str) -> anyhow::Result<Self> {
+        if !is_valid_path_segment(org) || !is_valid_path_segment(name) {
+            anyhow::bail!(GIT_REQUEST_NOT_FOUND);
+        }
         let archive_path_str = archive_path.to_string_lossy();
         tracing::trace!(org, name, "Creating new Repo at {archive_path_str}");
         let repo_path = format!("{archive_path_str}/{org}/{name}");
@@ -142,9 +179,56 @@ impl Repo {
         Self::new(&archive_path, &org, &name)
     }
 
+    /// Resolve `revision` to a commit in the repository.
+    ///
+    /// # Errors
+    /// Will error with [`GIT_REQUEST_NOT_FOUND`] if the revision does not
+    /// resolve to a commit.
+    #[expect(
+        clippy::pattern_type_mismatch,
+        reason = "Matching on a reference to the enum is clearer than dereferencing it"
+    )]
+    pub fn resolve_commit(&self, revision: &Revision) -> Result<Commit<'_>> {
+        let commit = match revision {
+            Revision::Head => self.repo.head().and_then(|head| head.peel_to_commit()),
+            Revision::Branch(name) => self
+                .repo
+                .find_reference(&format!("refs/heads/{name}"))
+                .and_then(|reference| reference.peel_to_commit()),
+            Revision::Commit(oid) => self.repo.find_commit(*oid),
+        };
+        commit.map_err(|err| {
+            tracing::debug!(?revision, "Couldn't resolve revision: {err}");
+            anyhow::anyhow!(GIT_REQUEST_NOT_FOUND)
+        })
+    }
+
+    /// Check whether the commit `oid` is the tip of a local branch or one of
+    /// its ancestors.
+    ///
+    /// # Errors
+    /// Will error if the local branches cannot be listed or the commit graph
+    /// cannot be read.
+    pub fn is_on_local_branch(&self, oid: Oid) -> Result<bool> {
+        for branch in self.repo.branches(Some(BranchType::Local))? {
+            let (local_branch, _) = branch?;
+            let Some(tip) = local_branch.get().target() else {
+                continue;
+            };
+            if tip == oid || self.repo.graph_descendant_of(tip, oid)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     /// Returns bytes of blob found in the commit `commitish` at path `path`
     /// if a blob is not found at path, it will try adding ".html", "index.html,
     /// and "/index.html".
+    ///
+    /// `commitish` must be `HEAD`, a local branch name or a full commit ID
+    /// (see [`Revision`]).
+    ///
     /// Example usage:
     ///
     //// let content: Vec<u8> = repo.get_bytes_at_path(
@@ -154,61 +238,42 @@ impl Repo {
     ///
     /// # Errors
     ///
-    /// Will return `Err` if `commitish` does not exist in repo, if a blob does
-    /// not exist in commit at `path`, or if there is a problem with reading repo.
-    pub fn get_bytes_at_path(&self, commitish: &str, path: &str) -> anyhow::Result<Blob> {
-        let base_revision = format!("{commitish}:{path}");
-        for postfix in ["", "/index.html", ".html", "index.html"] {
-            let query = format!("{base_revision}{postfix}");
-            let blob = self.find(&query);
-            if let Ok(content) = blob {
-                let filepath = format!("{path}{postfix}");
-                let blob_hash = self.get_file_blob_hash(commitish, &filepath)?;
-                tracing::trace!(query, "Found Git object");
-                return Ok(Blob {
-                    content,
-                    path: filepath,
-                    blob_hash,
-                });
-            }
-        }
-        tracing::debug!(base_revision, "Couldn't find requested Git object");
-        anyhow::bail!(GIT_REQUEST_NOT_FOUND)
+    /// Will return `Err` if `commitish` is not a valid revision or does not
+    /// exist in repo, if a blob does not exist in commit at `path`, or if there
+    /// is a problem with reading repo.
+    pub fn get_bytes_at_path(&self, commitish: &str, path: &str) -> Result<Blob> {
+        let revision = Revision::parse(commitish)?;
+        let commit = self.resolve_commit(&revision)?;
+        self.get_bytes_at_commit(&commit, path)
     }
-    /// Returns the Git blob hash (OID) of a file found in the commit `commitish`
-    /// at path `path`.
-    ///
-    /// The `commitish` parameter may be any Git revision specifier, such as:
-    /// a full or short commit hash, branch name, tag, or a relative reference
-    /// like `HEAD~1`.
-    ///
-    /// The lookup is performed using Git’s native `<commitish>:<path>` resolution,
-    /// matching the behavior of `git show`.
-    ///
-    /// # Example
-    ///
-    ///
-    /// let oid = `repo.get_blob_hash_at_path`(
-    ///     "0f2f1ef9fa213dcf83e269bc832ab63435cbd4b1",
-    ///     "us/ca/cities/san-mateo",
-    /// )?;
-    ///
-    /// println!("Blob hash: {}", oid);
-    ///
+
+    /// Returns bytes of blob found in `commit` at path `path`, trying the same
+    /// suffixes as [`Repo::get_bytes_at_path`].
     ///
     /// # Errors
     ///
-    /// Returns `Err` if:
-    /// - `commitish` cannot be resolved in the repository
-    /// - no blob exists at the specified path or any fallback path
-    /// - the resolved object is not a blob
-    /// - there is an error reading from the repository
-    pub fn get_file_blob_hash(&self, commitish: &str, path: &str) -> Result<Oid> {
-        let query = format!("{commitish}:{path}");
-        let obj = self.repo.revparse_single(&query)?;
-        let blob = obj.peel_to_blob()?;
-        Ok(blob.id())
+    /// Will return `Err` if a blob does not exist in `commit` at `path`, or if
+    /// the commit's tree cannot be read.
+    pub fn get_bytes_at_commit(&self, commit: &Commit<'_>, path: &str) -> Result<Blob> {
+        let tree = commit.tree()?;
+        for postfix in ["", "/index.html", ".html", "index.html"] {
+            let filepath = format!("{path}{postfix}");
+            let Ok(entry) = tree.get_path(Path::new(filepath.trim_start_matches('/'))) else {
+                continue;
+            };
+            if let Ok(blob) = self.repo.find_blob(entry.id()) {
+                tracing::trace!(filepath, "Found Git object");
+                return Ok(Blob {
+                    content: blob.content().to_owned(),
+                    path: filepath,
+                    blob_hash: blob.id(),
+                });
+            }
+        }
+        tracing::debug!(commit = %commit.id(), path, "Couldn't find requested Git object");
+        anyhow::bail!(GIT_REQUEST_NOT_FOUND)
     }
+
     /// Instantiates a git revwalk from the beginning of the repository.
     /// Return an iterator over the commits.
     ///

@@ -43,7 +43,7 @@ sqlx = { version = "0.9", features = [
     "postgres",
     "sqlite",
 ] }
-sophia = { version = "0.8", features = ["xml"] }
+sophia = { version = "0.10", features = ["xml"] }
 url = "2"
 
 [dev-dependencies]

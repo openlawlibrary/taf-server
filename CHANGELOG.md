@@ -14,12 +14,21 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 
 ### Changed
 
+- Bump `sophia` to 0.10 ([#120])
+- Restrict `commitish` to `HEAD`, a local branch or a full commit ID ([#137])
+- Check `_archive` privacy against every fonds listing the repository ([#137])
+
 ### Fixed
 
-- Serve the `_date` endpoint's database reads as individual pooled queries instead of holding one shared transaction for the whole request, and run the git blob lookup on the blocking thread pool so it no longer stalls the async executor ([#141])
+- Serve the `_date` endpoint's by using pooled queries instead of shared transaction and moving git blob looks to the blocking thread pool ([#141])
+- Add `nosniff` and `sandbox` headers to blob responses ([#137])
 
 ### Removed
 
+- Remove unused `Repo::get_file_blob_hash` ([#137])
+
+[#137]: https://github.com/openlawlibrary/taf-server/pull/137
+[#120]: https://github.com/openlawlibrary/taf-server/pull/120
 [#132]: https://github.com/openlawlibrary/taf-server/pull/132
 [#141]: https://github.com/openlawlibrary/taf-server/pull/141
 
