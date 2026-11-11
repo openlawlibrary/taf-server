@@ -31,6 +31,8 @@ pub trait TxManager {
         repo_name: &str,
         redirect_pairs: Vec<RedirectPair>,
     ) -> anyhow::Result<()>;
+    /// Deletes all redirects of a fonds.
+    async fn delete_for_fonds(&mut self, fonds: &str) -> anyhow::Result<()>;
 }
 
 #[derive(sqlx::FromRow, Deserialize, Serialize, Debug)]

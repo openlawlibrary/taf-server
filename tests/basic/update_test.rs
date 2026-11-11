@@ -179,3 +179,23 @@ fn test_update_where_auth_repo_reset_to_earlier_commit_expect_rebuild() {
     assert_eq!(count(&td, rows, &second.to_string()), 0);
     assert!(count(&td, rows, &first.to_string()) >= 1);
 }
+
+#[test]
+fn test_update_where_redirects_changed_expect_only_current_redirects_stored() {
+    let td = new_archive();
+    commit_publication(&td, "2021-04-23", &[]);
+    let old = r#"[["/a", "/old"], ["/b", "/b-target"]]"#;
+    commit_files(&td, HTML, &[("redirects.json", Some(old))]);
+    assert!(run_update(&td));
+    commit_files(
+        &td,
+        HTML,
+        &[("redirects.json", Some(r#"[["/a", "/new"]]"#))],
+    );
+    assert!(run_update(&td));
+    let from = "SELECT COUNT(*) FROM redirects WHERE from_url = ?";
+    let to = "SELECT COUNT(*) FROM redirects WHERE to_url = ?";
+    assert_eq!(count(&td, from, "/b"), 0);
+    assert_eq!(count(&td, from, "/a"), 1);
+    assert_eq!(count(&td, to, "/new"), 1);
+}
