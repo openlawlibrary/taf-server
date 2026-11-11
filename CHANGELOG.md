@@ -22,6 +22,10 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 
 - Serve the `_date` endpoint's by using pooled queries instead of shared transaction and moving git blob looks to the blocking thread pool ([#141])
 - Add `nosniff` and `sandbox` headers to blob responses ([#137])
+- Reject RDF/XML with a document type declaration ([#142])
+- Rebuild a fonds when its auth repository is reset or a publication is removed ([#142])
+- Replace a fonds's redirects on every update ([#142])
+- Load same-date republications and backdated publications in full ([#142])
 
 ### Removed
 
@@ -31,6 +35,7 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 [#120]: https://github.com/openlawlibrary/taf-server/pull/120
 [#132]: https://github.com/openlawlibrary/taf-server/pull/132
 [#141]: https://github.com/openlawlibrary/taf-server/pull/141
+[#142]: https://github.com/openlawlibrary/taf-server/pull/142
 
 ## [v0.7.1]
 
