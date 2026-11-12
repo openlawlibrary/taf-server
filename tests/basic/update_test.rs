@@ -4,7 +4,7 @@
 //! that drive database queries with their own `System`.
 use crate::archive_testtools::config::{ArchiveType, Jurisdiction};
 use crate::common;
-use git2::{Oid, Repository, Signature};
+use git2::{Oid, Repository, Signature, Time};
 use std::path::Path;
 use taf_server::db::DatabaseConnection;
 use tempfile::TempDir;
@@ -13,7 +13,7 @@ const AUTH: &str = "test_org/law";
 const HTML: &str = "test_org/law-html";
 const RDF: &str = "test_org/law-rdf";
 
-/// Commit `writes` to `repo`; `None` deletes the file.
+/// Commit `writes` to `repo` one second after its HEAD; `None` deletes the file.
 fn commit_files(td: &TempDir, repo: &str, writes: &[(&str, Option<&str>)]) -> Oid {
     let repo_dir = td.path().join(repo);
     let repo = Repository::open(&repo_dir).unwrap();
@@ -31,8 +31,9 @@ fn commit_files(td: &TempDir, repo: &str, writes: &[(&str, Option<&str>)]) -> Oi
     }
     index.write().unwrap();
     let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
-    let sig = Signature::now("test", "test@example.com").unwrap();
     let parent = repo.head().unwrap().peel_to_commit().unwrap();
+    let time = Time::new(parent.time().seconds() + 1, 0);
+    let sig = Signature::new("test", "test@example.com", &time).unwrap();
     repo.commit(Some("HEAD"), &sig, &sig, "commit", &tree, &[&parent])
         .unwrap()
 }
