@@ -6,7 +6,6 @@ use crate::archive_testtools::config::{ArchiveType, Jurisdiction};
 use crate::common;
 use git2::{Oid, Repository, Signature, Time};
 use std::path::Path;
-use taf_server::db::DatabaseConnection;
 use tempfile::TempDir;
 
 const AUTH: &str = "test_org/law";
@@ -103,12 +102,14 @@ fn run_update(td: &TempDir) -> bool {
 
 fn count(td: &TempDir, sql: &'static str, bind: &str) -> i64 {
     actix_web::rt::System::new().block_on(async {
-        let db: DatabaseConnection = common::get_db(td.path()).await;
-        sqlx::query_scalar(sql)
+        let db = taf_server::db::init::connect(td.path()).await.unwrap();
+        let value = sqlx::query_scalar(sql)
             .bind(bind)
             .fetch_one(&db.pool)
             .await
-            .unwrap()
+            .unwrap();
+        db.pool.close().await;
+        value
     })
 }
 
