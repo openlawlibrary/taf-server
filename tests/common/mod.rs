@@ -10,12 +10,11 @@ use actix_web::{
     Error,
 };
 use anyhow::Result;
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Once, PoisonError, RwLock};
+use std::sync::{Arc, Once, RwLock};
 use taf_server::db::models::redirects::Manager as _;
 use taf_server::db::{self, DatabaseConnection};
-use taf_server::server::api::state::Global;
+use taf_server::server::api::state::App as AppState;
 use tempfile::Builder;
 static INIT: Once = Once::new();
 
@@ -37,33 +36,21 @@ pub fn blob_to_string(blob: Vec<u8>) -> String {
 // to manually inspect state of test environment at present,
 // we use anyhow::bail!() which aborts the entire test suite.
 
-#[derive(Debug, Clone)]
-pub struct TestAppState {
-    pub archive: Archive,
-    pub db: DatabaseConnection,
-    pub repos_with_redirects: Arc<RwLock<HashSet<(String, String)>>>,
-}
-
-impl Global for TestAppState {
-    fn archive(&self) -> &Archive {
-        &self.archive
-    }
-    fn db(&self) -> &db::DatabaseConnection {
-        &self.db
-    }
-    fn has_redirects(&self, fonds: &str, repo_name: &str) -> bool {
-        self.repos_with_redirects
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .contains(&(fonds.to_owned(), repo_name.to_owned()))
-    }
-    fn set_repos_with_redirects(&self, repos: HashSet<(String, String)>) {
-        *self
-            .repos_with_redirects
-            .write()
-            .unwrap_or_else(PoisonError::into_inner) = repos;
-    }
-}
+/// The state the test app runs on.
+///
+/// This is deliberately the *production* `state::App`, not a parallel test
+/// type. `routes.rs` registers `web::Data::new(state.clone())`, so the app
+/// data in the `/_api` scope is `web::Data<T>` for whatever `T` is passed
+/// here -- while the `/_api/versions` and `/_api/menu` handlers extract
+/// `web::Data<state::App>` concretely. With a bespoke `TestAppState` those two
+/// types never match and every `/_api` request fails extraction with
+/// "Requested application data is not configured correctly" (HTTP 500).
+///
+/// Nothing caught that before because no test had ever called an `/_api`
+/// endpoint; the archive and git routes take their state through other
+/// mechanisms. Using `state::App` keeps the harness identical to
+/// `server::app::serve_archive`.
+pub type TestAppState = AppState;
 
 /// Initializes the app.
 ///

@@ -3,3 +3,6 @@
 .vscode/
 
 !.vscode/settings.json
+
+# Temp archives created by the integration-test harness
+tests/fixtures/.tmp*

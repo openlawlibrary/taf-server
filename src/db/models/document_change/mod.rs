@@ -13,6 +13,18 @@ pub trait Manager {
         mpath: &str,
         publication: &str,
     ) -> anyhow::Result<Vec<Version>>;
+    /// Every element that changed in one version of one publication, under a
+    /// materialized-path prefix.
+    ///
+    /// The manager appends the `LIKE` wildcard. Callers must still drop rows
+    /// that do not `starts_with(base)`: `LIKE` is ASCII-case-insensitive and
+    /// treats `%`/`_` inside the base as wildcards.
+    async fn find_changes_in_version_by_prefix(
+        &self,
+        mpath_prefix: &str,
+        publication_id: &str,
+        version: &str,
+    ) -> anyhow::Result<Vec<VersionChange>>;
 }
 
 /// Trait for managing transactional document changes.
@@ -37,6 +49,23 @@ pub struct DocumentChange {
     pub publication_version_id: String,
     /// Materialized path to the document
     pub doc_mpath: String,
+}
+
+#[derive(sqlx::FromRow, Deserialize, Serialize, Debug, Clone)]
+/// Read projection: one change row inside one selected publication version.
+pub struct VersionChange {
+    /// Materialized path of the element that changed.
+    pub doc_mpath: String,
+    /// Change status as the integer stored in `document_change.status`.
+    pub status: i64,
+}
+
+impl VersionChange {
+    /// Create a new version change row. Used by tests and by pure synthesis.
+    #[must_use]
+    pub const fn new(doc_mpath: String, status: i64) -> Self {
+        Self { doc_mpath, status }
+    }
 }
 
 impl DocumentChange {

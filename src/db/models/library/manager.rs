@@ -1,5 +1,5 @@
 //! Manager for the library model.
-use super::Library;
+use super::{Library, LibraryLabel};
 use crate::db::{models::BATCH_SIZE, DatabaseConnection, DatabaseKind, DatabaseTransaction};
 use async_trait::async_trait;
 use sqlx::QueryBuilder;
@@ -28,6 +28,45 @@ impl super::Manager for DatabaseConnection {
             }
         };
         Ok(row.0)
+    }
+
+    /// Find urls for an explicit set of library materialized paths.
+    ///
+    /// Served by the `library(mpath)` primary-key autoindex, one seek per mpath.
+    ///
+    /// # Errors
+    /// Errors if can't establish a connection to the database.
+    async fn find_labels_by_mpaths(
+        &self,
+        mpaths: &[String],
+        fonds: &str,
+    ) -> anyhow::Result<Vec<LibraryLabel>> {
+        if mpaths.is_empty() {
+            return Ok(vec![]);
+        }
+        let mut labels: Vec<LibraryLabel> = vec![];
+        match self.kind {
+            DatabaseKind::Sqlite => {
+                let mut connection = self.pool.acquire().await?;
+                for chunk in mpaths.chunks(BATCH_SIZE) {
+                    let mut query_builder = QueryBuilder::new(
+                        "SELECT l.mpath AS mpath, l.url AS url FROM library l WHERE l.mpath IN (",
+                    );
+                    let mut separated = query_builder.separated(", ");
+                    for mpath in chunk {
+                        separated.push_bind(mpath);
+                    }
+                    separated.push_unseparated(") AND l.fonds = ");
+                    query_builder.push_bind(fonds);
+                    let rows = query_builder
+                        .build_query_as::<LibraryLabel>()
+                        .fetch_all(&mut *connection)
+                        .await?;
+                    labels.extend(rows);
+                }
+            }
+        }
+        Ok(labels)
     }
 }
 

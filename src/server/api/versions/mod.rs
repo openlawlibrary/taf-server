@@ -237,14 +237,22 @@ fn finalize_versions(versions: &mut Vec<response::Version>, include_current: boo
 }
 
 /// Format a date from %Y-%m-%d to %B %d, %Y.
-fn format_date(date: &str) -> String {
+///
+/// Public so the menu endpoint can reuse it for its top-level `display` string
+/// rather than duplicating the publication display-string logic.
+#[must_use]
+pub fn format_date(date: &str) -> String {
     NaiveDate::parse_from_str(date, "%Y-%m-%d").map_or(date.to_owned(), |found_date| {
         found_date.format("%B %d, %Y").to_string()
     })
 }
 
 /// Clean the url path by removing the trailing slash.
-fn clean_url_path(path: &str) -> String {
+///
+/// Public so the menu endpoint normalises its path tail exactly as `versions()`
+/// does, rather than growing a second, subtly different normaliser.
+#[must_use]
+pub fn clean_url_path(path: &str) -> String {
     let mut url = String::from('/');
     let url_parts = clean_path(path);
     url.push_str(&url_parts);

@@ -1,5 +1,5 @@
 //! Manager for the document change model.
-use super::DocumentChange;
+use super::{DocumentChange, VersionChange};
 use crate::db::{
     models::{status::Status, version::Version, BATCH_SIZE},
     DatabaseConnection, DatabaseKind, DatabaseTransaction,
@@ -99,6 +99,50 @@ impl super::Manager for DatabaseConnection {
             }
         }
         rows.sort_by(|v1, v2| v2.codified_date.cmp(&v1.codified_date));
+        Ok(rows)
+    }
+
+    /// Every element that changed in one version of one publication, under a
+    /// materialized-path prefix.
+    ///
+    /// `pv` is joined through `phpv`, not off `dc`: a change row may point at a
+    /// `publication_version` owned by an earlier publication, so filtering
+    /// `phpv.publication_id` is what scopes it. A `pv.publication_id` predicate
+    /// would break lightweight publications.
+    ///
+    /// No `ESCAPE` clause; the caller's `starts_with` guard covers over-match.
+    ///
+    /// # Errors
+    /// Errors if can't establish a connection to the database.
+    async fn find_changes_in_version_by_prefix(
+        &self,
+        mpath_prefix: &str,
+        publication_id: &str,
+        version: &str,
+    ) -> anyhow::Result<Vec<VersionChange>> {
+        let statement = "
+            SELECT dc.doc_mpath AS doc_mpath,
+                   dc.status    AS status
+            FROM document_change dc
+            JOIN publication_has_publication_versions phpv
+              ON phpv.publication_version_id = dc.publication_version_id
+            JOIN publication_version pv
+              ON pv.id = phpv.publication_version_id
+            WHERE dc.doc_mpath LIKE $1
+              AND phpv.publication_id = $2
+              AND pv.version = $3
+        ";
+        let rows = match self.kind {
+            DatabaseKind::Sqlite => {
+                let mut connection = self.pool.acquire().await?;
+                sqlx::query_as::<_, VersionChange>(statement)
+                    .bind(format!("{mpath_prefix}%"))
+                    .bind(publication_id)
+                    .bind(version)
+                    .fetch_all(&mut *connection)
+                    .await?
+            }
+        };
         Ok(rows)
     }
 }
