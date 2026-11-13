@@ -17,6 +17,7 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 - Bump `sophia` to 0.10 ([#120])
 - Restrict `commitish` to `HEAD`, a local branch or a full commit ID ([#137])
 - Check `_archive` privacy against every fonds listing the repository ([#137])
+- Redirect unknown or revoked `_publication` names to the latest publication ([#138])
 
 ### Fixed
 
@@ -26,16 +27,25 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 - Rebuild a fonds when its auth repository is reset or a publication is removed ([#142])
 - Replace a fonds's redirects on every update ([#142])
 - Load same-date republications and backdated publications in full ([#142])
+- Skip a fonds that fails to load instead of stopping the whole archive ([#139])
+- Validate `repositories.json` names and routes when loading ([#139])
+- Escape dependent fonds scopes ([#139])
+- Return 400 for malformed `_date` dates and 404 for dates before the first version ([#138])
+- Use relative links in `_date` banners ([#138])
+- Escape non-date values in `_api/versions` messages ([#138])
 
 ### Removed
 
 - Remove unused `Repo::get_file_blob_hash` ([#137])
 
+[#142]: https://github.com/openlawlibrary/taf-server/pull/142
+[#141]: https://github.com/openlawlibrary/taf-server/pull/141
+[#138]: https://github.com/openlawlibrary/taf-server/pull/138
 [#137]: https://github.com/openlawlibrary/taf-server/pull/137
+[#139]: https://github.com/openlawlibrary/taf-server/pull/139
 [#120]: https://github.com/openlawlibrary/taf-server/pull/120
 [#132]: https://github.com/openlawlibrary/taf-server/pull/132
-[#141]: https://github.com/openlawlibrary/taf-server/pull/141
-[#142]: https://github.com/openlawlibrary/taf-server/pull/142
+
 
 ## [v0.7.1]
 

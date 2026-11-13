@@ -5,7 +5,6 @@
 //! helpers for building URL prefixes, formatting dates, fetching document
 //! version dates, and inserting notification banners into HTML documents.
 
-use actix_web::HttpRequest;
 use chrono::NaiveDate;
 use libxml::parser::Parser;
 use libxml::tree::SaveOptions;
@@ -40,18 +39,6 @@ pub fn build_url_prefix(pub_name: &str, date: &str) -> String {
         format!("/_date/{date}")
     };
     format!("{pub_part}{date_part}")
-}
-
-/// Builds an absolute URL from the request's scheme/host and a path.
-#[must_use]
-pub fn build_absolute_url(req: &HttpRequest, path: &str) -> String {
-    let conn = req.connection_info();
-    let absolute_url = if path.starts_with('/') {
-        path.to_owned()
-    } else {
-        format!("/{path}")
-    };
-    format!("{}://{}{}", conn.scheme(), conn.host(), absolute_url)
 }
 
 /// Formats a `YYYY-MM-DD` date string for display as `Month DD, YYYY`.

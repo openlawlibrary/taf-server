@@ -86,7 +86,8 @@ impl Fonds {
 
     /// Get Fonds's repositories.
     /// # Errors
-    /// Will error if unable to find or parse repositories file at `targets/repositories.json`
+    /// Will error if unable to find, parse or validate the repositories file at
+    /// `targets/repositories.json` (see [`Repositories::validate`])
     pub fn get_repositories(&mut self) -> anyhow::Result<Option<Repositories>> {
         let Ok(blob) = self
             .auth_repo
@@ -96,6 +97,7 @@ impl Fonds {
         };
         let repositories_str = String::from_utf8(blob.content)?;
         let repositories: Repositories = serde_json::from_str(&repositories_str)?;
+        repositories.validate()?;
         self.repositories = Some(repositories.clone());
         Ok(Some(repositories))
     }

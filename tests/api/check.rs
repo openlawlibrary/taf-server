@@ -1093,3 +1093,43 @@ fn test_check_when_xml_repo_missing_codified_date_expect_only_build_date_warning
     assert_eq!(report.warnings.len(), 1, "warnings: {:?}", report.warnings);
     assert!(report.warnings[0].message.contains("build-date"));
 }
+
+#[test]
+fn test_check_when_dependency_field_missing_and_route_invalid_expect_errors() {
+    let archive_path =
+        common::initialize_archive_without_bare(ArchiveType::Basic(Jurisdiction::Single)).unwrap();
+    make_root_valid(archive_path.path(), "test_org", &[]).unwrap();
+    init_minimal_valid_fonds(archive_path.path(), "ghost_org").unwrap();
+    let repositories = r#"{ "repositories": { "ghost_org/law-html": { "custom": { "serve": "latest", "routes": ["(unclosed"] } } } }"#;
+    write_to_file(
+        &archive_path.path().join("ghost_org/law"),
+        repositories.to_owned(),
+        "repositories.json".to_owned(),
+    )
+    .unwrap();
+    let dependencies = r#"{ "dependencies": { "ghost_org/law": { "branch": "main" } } }"#;
+    write_to_file(
+        &archive_path.path().join("test_org/law"),
+        dependencies.to_owned(),
+        "dependencies.json".to_owned(),
+    )
+    .unwrap();
+
+    let report = check::check(
+        archive_path.path().to_str().unwrap(),
+        archive_path.path().to_path_buf(),
+    )
+    .unwrap();
+
+    let actual: Vec<bool> = ["out-of-band-authentication", "invalid route '(unclosed'"]
+        .iter()
+        .map(|message| {
+            report
+                .errors
+                .iter()
+                .any(|error| error.message.contains(message))
+        })
+        .collect();
+    assert_eq!(actual, [true, true], "errors: {:?}", report.errors);
+    assert_eq!(report.errors.len(), 2, "errors: {:?}", report.errors);
+}

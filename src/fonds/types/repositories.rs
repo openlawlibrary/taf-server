@@ -1,12 +1,16 @@
 //! A Fonds's data repositories.
 use std::{collections::HashMap, fmt, string::String};
 
+use anyhow::Context as _;
+use regex::Regex;
 use serde::{
     de::{self, MapAccess, Visitor},
     Deserialize, Deserializer,
 };
 use serde_derive::Serialize;
 use serde_json::Value;
+
+use crate::utils::archive::get_name_parts;
 
 /// Repositories object
 ///
@@ -137,6 +141,22 @@ pub struct Custom {
 }
 
 impl Repositories {
+    /// Check that every repository name is in `<org>/<name>` format and that
+    /// every route compiles as the regex Actix builds from it.
+    ///
+    /// # Errors
+    /// Will error on the first invalid repository name or route.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        self.repositories.values().try_for_each(|repository| {
+            get_name_parts(&repository.name)?;
+            for route in repository.custom.routes.iter().flatten() {
+                Regex::new(&format!("^/(?P<tail>{route})$"))
+                    .with_context(|| format!("invalid route '{route}' in '{}'", repository.name))?;
+            }
+            Ok(())
+        })
+    }
+
     /// Get the repositories sorted by the length of their routes, longest first.
     ///
     /// This is needed for serving current documents because Actix routes are matched in the order they are added.
