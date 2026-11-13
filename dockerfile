@@ -1,4 +1,4 @@
-FROM rust:1.88
+FROM rust:1.97.1
 
 # Install necessary tools (if needed)
 RUN apt-get update && apt-get install -y bash
