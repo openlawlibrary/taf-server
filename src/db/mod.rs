@@ -74,7 +74,7 @@ impl DatabaseConnection {
             Err(_) => 4,
         };
         let options = any::AnyConnectOptions::from_str(db_url)?
-            .log_slow_statements(log::LevelFilter::Warn, time::Duration::from_secs(1));
+            .log_slow_statements(log::LevelFilter::Debug, time::Duration::from_secs(1));
         let db_kind = if db_url.starts_with("sqlite:///") {
             DatabaseKind::Sqlite
         } else {
