@@ -237,10 +237,18 @@ fn finalize_versions(versions: &mut Vec<response::Version>, include_current: boo
 }
 
 /// Format a date from %Y-%m-%d to %B %d, %Y.
+/// Any other input is returned HTML-escaped, since messages are rendered as HTML.
 fn format_date(date: &str) -> String {
-    NaiveDate::parse_from_str(date, "%Y-%m-%d").map_or(date.to_owned(), |found_date| {
-        found_date.format("%B %d, %Y").to_string()
-    })
+    NaiveDate::parse_from_str(date, "%Y-%m-%d").map_or_else(
+        |_| {
+            date.replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;")
+                .replace('"', "&quot;")
+                .replace('\'', "&#39;")
+        },
+        |found_date| found_date.format("%B %d, %Y").to_string(),
+    )
 }
 
 /// Clean the url path by removing the trailing slash.
@@ -260,7 +268,16 @@ fn clean_url_path(path: &str) -> String {
     reason = "tests"
 )]
 mod tests {
-    use super::{finalize_versions, response, CURRENT_VERSION_DATE, CURRENT_VERSION_NAME};
+    use super::{
+        finalize_versions, format_date, response, CURRENT_VERSION_DATE, CURRENT_VERSION_NAME,
+    };
+
+    #[test]
+    fn format_date_when_not_a_date_expect_html_escaped() {
+        let actual = format_date(r#"<img src="x">&'"#);
+        let expected = "&lt;img src=&quot;x&quot;&gt;&amp;&#39;";
+        assert_eq!(actual, expected);
+    }
 
     fn sample_versions() -> Vec<response::Version> {
         vec![
