@@ -32,7 +32,8 @@ pub async fn insert_redirect_pairs(
     Ok(())
 }
 
-/// Inserts redirect pairs for all repositories of a fonds within an existing transaction.
+/// Replaces the redirects of a fonds with those of its repositories, within an existing
+/// transaction.
 ///
 /// # Arguments
 ///
@@ -46,6 +47,7 @@ pub async fn insert_redirects_for_fonds(
     tx: &mut DatabaseTransaction,
     fonds: &mut Fonds,
 ) -> anyhow::Result<()> {
+    redirects::TxManager::delete_for_fonds(tx, &fonds.get_qualified_name()).await?;
     let Some(repositories) = fonds.get_repositories()? else {
         return Ok(());
     };

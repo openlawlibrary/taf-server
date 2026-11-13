@@ -55,6 +55,8 @@ pub trait TxManager {
         name: &str,
         fonds: &str,
     ) -> anyhow::Result<Option<Publication>>;
+    /// Check whether a publication, revoked or not, is stored for a fonds.
+    async fn exists_by_name_and_fonds(&mut self, name: &str, fonds: &str) -> anyhow::Result<bool>;
     /// Find the first publication by name and fonds that is not revoked.
     async fn find_first_by_name_and_fonds_non_revoked(
         &mut self,
@@ -77,8 +79,8 @@ pub trait TxManager {
         date: String,
         fonds: String,
     ) -> anyhow::Result<Vec<Publication>>;
-    /// Count the number of non-revoked publications for a given fonds.
-    async fn count_non_revoked(&mut self, fonds: &str) -> anyhow::Result<usize>;
+    /// Find the names of the non-revoked publications for a given fonds.
+    async fn find_non_revoked_names(&mut self, fonds: &str) -> anyhow::Result<Vec<String>>;
     /// Count the non-revoked publications for a given fonds that carry no
     /// `html_data_repo_name`.
     async fn count_non_revoked_missing_html_data_repo_name(

@@ -107,8 +107,10 @@ impl Archive {
     }
 
     /// Traverse the child Fonds of the current Fonds.
+    ///
+    /// A child Fonds that fails to load is logged and skipped.
     /// # Errors
-    /// Will raise error if unable to traverse the child fonds.
+    /// Will raise error if unable to read the current Fonds's dependencies.
     /// # Panics
     /// If unable to unwrap the parent directory of the current path.
     pub fn traverse_children(
@@ -121,31 +123,42 @@ impl Archive {
                 if visited.contains(&qualified_name) {
                     continue;
                 }
-                let parent_dir = self.path.clone();
-                let (org, name) = get_name_parts(&qualified_name)?;
-                if fs::metadata(parent_dir.join(&org).join(&name)).is_err() {
-                    // Fonds does not exist on the filesystem, continue to traverse other Fonds
-                    continue;
+                if let Err(err) = self.traverse_child(&qualified_name, visited) {
+                    tracing::error!("Skipping Fonds '{qualified_name}': {err:#}");
                 }
-                let child = Fonds::new(
-                    &self.path,
-                    Some(name),
-                    Some(org.clone()),
-                    Some(parent_dir.join(org)),
-                    false,
-                )?;
-                self.fonds_map
-                    .entry(format!(
-                        "{org}/{name}",
-                        org = child.auth_repo.org,
-                        name = child.auth_repo.name
-                    ))
-                    .or_insert_with(|| child.clone());
-                visited.push(child.get_qualified_name());
-                self.traverse_children(&child, visited)?;
             }
         }
         Ok(())
+    }
+
+    /// Load the child Fonds `qualified_name`, then traverse its children.
+    fn traverse_child(
+        &mut self,
+        qualified_name: &str,
+        visited: &mut Vec<String>,
+    ) -> anyhow::Result<()> {
+        let parent_dir = self.path.clone();
+        let (org, name) = get_name_parts(qualified_name)?;
+        if fs::metadata(parent_dir.join(&org).join(&name)).is_err() {
+            // Fonds does not exist on the filesystem, continue to traverse other Fonds
+            return Ok(());
+        }
+        let child = Fonds::new(
+            &self.path,
+            Some(name),
+            Some(org.clone()),
+            Some(parent_dir.join(org)),
+            false,
+        )?;
+        self.fonds_map
+            .entry(format!(
+                "{org}/{name}",
+                org = child.auth_repo.org,
+                name = child.auth_repo.name
+            ))
+            .or_insert_with(|| child.clone());
+        visited.push(child.get_qualified_name());
+        self.traverse_children(&child, visited)
     }
 }
 

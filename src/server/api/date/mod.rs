@@ -16,6 +16,9 @@ pub mod notifications;
 /// # Behavior
 /// - If the requested date matches the current version, the latest content is served.
 /// - If no commit exists for the given date, the closest prior version is used.
+/// - A date that is not `YYYY-MM-DD` returns 400, and a date before the
+///   publication's first version returns 404.
+/// - An unknown or revoked publication name redirects to the latest publication.
 /// - Content type is inferred from the file path.
 ///
 /// # Example
@@ -25,8 +28,8 @@ pub mod notifications;
 pub mod request;
 
 use super::doc_transform::{
-    build_absolute_url, build_url_prefix, format_date_display, get_doc_version_dates,
-    get_version_start_end_current, insert_notification, update_doc_urls, update_json_content,
+    build_url_prefix, format_date_display, get_doc_version_dates, get_version_start_end_current,
+    insert_notification, update_doc_urls, update_json_content,
 };
 use super::state::App as AppState;
 use crate::server::api::versions::get_fonds_from_request;
@@ -42,9 +45,10 @@ use crate::{
     },
     utils::{git::Repo, http::get_contenttype, paths::clean_path},
 };
-use actix_web::http::header::ContentType;
+use actix_web::http::header::{ContentType, LOCATION};
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use anyhow::anyhow;
+use chrono::NaiveDate;
 use mime::{APPLICATION, HTML, JSON, TEXT};
 use std::path::Path;
 
@@ -63,6 +67,14 @@ pub async fn date(
     data: web::Data<AppState>,
     params: web::Path<request::Date>,
 ) -> impl Responder {
+    if let Some(version_date) = params
+        .version_date
+        .as_deref()
+        .filter(|version_date| !is_canonical_date(version_date))
+    {
+        tracing::error!(version_date, "Version date is not a YYYY-MM-DD date");
+        return HttpResponse::BadRequest().body("");
+    }
     // get publication and repo name
     let auth_fonds_name = match get_fonds_from_request(&req, &data.archive) {
         Ok(rn) => rn,
@@ -88,6 +100,13 @@ pub async fn date(
             return HttpResponse::NotFound().body("");
         }
     };
+    if params
+        .pub_name
+        .as_deref()
+        .is_some_and(|pub_name| pub_name != publication.name)
+    {
+        return publication_redirect(&req, &publication.name);
+    }
     let html_repo_name = if let Some(archived_repo) = publication.html_data_repo_name.clone() {
         archived_repo
     } else {
@@ -180,8 +199,7 @@ pub async fn date(
             if let Some(end_date) = version_end_date {
                 let current_date_str = current_date.as_deref().unwrap_or_default();
                 let url_prefix = build_url_prefix(pub_name, current_date_str);
-                let current_version_url =
-                    build_absolute_url(&req, &format!("{url_prefix}/{doc_path}"));
+                let current_version_url = format!("{url_prefix}/{doc_path}");
                 let notification = notifications::outdated_doc(
                     &format_date_display(&version_date),
                     &format_date_display(version_start_date.as_deref().unwrap_or_default()),
@@ -198,8 +216,7 @@ pub async fn date(
                 if publication.name != latest_publication.name {
                     let current_date_str = current_date.as_deref().unwrap_or_default();
                     let url_prefix = build_url_prefix(&latest_publication.name, &version_date);
-                    let current_pub_url =
-                        build_absolute_url(&req, &format!("{url_prefix}/{doc_path}"));
+                    let current_pub_url = format!("{url_prefix}/{doc_path}");
                     let notification = notifications::outdated_pub(
                         &format_date_display(current_date_str),
                         &current_pub_url,
@@ -228,6 +245,25 @@ pub async fn date(
     return HttpResponse::Ok()
         .insert_header(content_type)
         .body(blob.content);
+}
+
+/// Check that `date` is a `YYYY-MM-DD` calendar date written in that exact form.
+fn is_canonical_date(date: &str) -> bool {
+    NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .is_ok_and(|parsed| parsed.format("%Y-%m-%d").to_string() == date)
+}
+
+/// Redirect a `/_publication/{name}/...` request to the same path under the
+/// publication `pub_name`.
+fn publication_redirect(req: &HttpRequest, pub_name: &str) -> HttpResponse {
+    let rest = req
+        .path()
+        .strip_prefix("/_publication/")
+        .and_then(|path| path.split_once('/'))
+        .map_or("", |(_, rest)| rest);
+    HttpResponse::Found()
+        .insert_header((LOCATION, format!("/_publication/{pub_name}/{rest}")))
+        .finish()
 }
 
 /// Finds and returns the HTML repository name for the given fonds.

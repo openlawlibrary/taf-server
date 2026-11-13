@@ -106,4 +106,16 @@ impl super::TxManager for DatabaseTransaction {
         }
         Ok(())
     }
+
+    /// Deletes all redirects of a fonds.
+    ///
+    /// # Errors
+    /// Errors if the delete statement fails.
+    async fn delete_for_fonds(&mut self, fonds: &str) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM redirects WHERE fonds_name = $1")
+            .bind(fonds)
+            .execute(&mut *self.tx)
+            .await?;
+        Ok(())
+    }
 }
