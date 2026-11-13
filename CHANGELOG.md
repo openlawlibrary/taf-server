@@ -16,6 +16,19 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 
 ### Removed
 
+## [v0.8.0-alpha.2]
+
+### Added
+
+### Changed
+
+### Fixed
+
+- Index foreign key columns so deleting a fonds no longer scans whole tables ([#145])
+- Log slow database statements at debug level instead of warning ([#145])
+
+### Removed
+
 ## [v0.8.0-alpha.1]
 
 ### Added
@@ -49,6 +62,7 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 
 - Remove unused `Repo::get_file_blob_hash` ([#137])
 
+[#145]: https://github.com/openlawlibrary/taf-server/pull/145
 [#143]: https://github.com/openlawlibrary/taf-server/pull/143
 [#142]: https://github.com/openlawlibrary/taf-server/pull/142
 [#141]: https://github.com/openlawlibrary/taf-server/pull/141
@@ -468,7 +482,8 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 
 ### Removed
 
-[Unreleased]: https://github.com/openlawlibrary/taf-server/compare/v0.8.0-alpha.1...HEAD
+[Unreleased]: https://github.com/openlawlibrary/taf-server/compare/v0.8.0-alpha.2...HEAD
+[v0.8.0-alpha.2]: https://github.com/openlawlibrary/taf-server/compare/v0.8.0-alpha.1...v0.8.0-alpha.2
 [v0.8.0-alpha.1]: https://github.com/openlawlibrary/taf-server/compare/v0.7.1...v0.8.0-alpha.1
 [v0.7.1]: https://github.com/openlawlibrary/taf-server/compare/v0.7.0...v0.7.1
 [v0.7.0]: https://github.com/openlawlibrary/taf-server/compare/v0.7.0-alpha.1...v0.7.0
