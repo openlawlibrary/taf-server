@@ -12,6 +12,8 @@ use sophia::api::graph::{GResult, GTerm, Graph as _};
 use sophia::api::ns::NsTerm;
 use sophia::api::prelude::*;
 use sophia::inmem::graph::FastGraph;
+use sophia::xml::parser;
+use std::io::BufReader;
 use std::iter;
 
 /// A term borrowed from a [`FondsGraph`].
@@ -40,6 +42,19 @@ impl FondsGraph {
             fast_graph: FastGraph::new(),
         }
     }
+
+    /// Parse RDF/XML into the graph.
+    ///
+    /// # Errors
+    /// Errors if the content has a document type declaration or is not valid RDF/XML.
+    pub fn add_rdf_xml(&mut self, content: &[u8]) -> anyhow::Result<()> {
+        if content.windows(9).any(|window| window == b"<!DOCTYPE") {
+            anyhow::bail!("RDF/XML with a document type declaration is not supported");
+        }
+        parser::parse_bufread(BufReader::new(content)).add_to_graph(&mut self.fast_graph)?;
+        Ok(())
+    }
+
     /// Extract a literal from a triple matching.
     ///
     /// # Errors
