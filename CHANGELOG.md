@@ -23,6 +23,9 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 
 - Serve the `_date` endpoint's by using pooled queries instead of shared transaction and moving git blob looks to the blocking thread pool ([#141])
 - Add `nosniff` and `sandbox` headers to blob responses ([#137])
+- Skip a fonds that fails to load instead of stopping the whole archive ([#139])
+- Validate `repositories.json` names and routes when loading ([#139])
+- Escape dependent fonds scopes ([#139])
 - Return 400 for malformed `_date` dates and 404 for dates before the first version ([#138])
 - Use relative links in `_date` banners ([#138])
 - Escape non-date values in `_api/versions` messages ([#138])
@@ -33,6 +36,7 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 
 [#138]: https://github.com/openlawlibrary/taf-server/pull/138
 [#137]: https://github.com/openlawlibrary/taf-server/pull/137
+[#139]: https://github.com/openlawlibrary/taf-server/pull/139
 [#120]: https://github.com/openlawlibrary/taf-server/pull/120
 [#132]: https://github.com/openlawlibrary/taf-server/pull/132
 [#141]: https://github.com/openlawlibrary/taf-server/pull/141
