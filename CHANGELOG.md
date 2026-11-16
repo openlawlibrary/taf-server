@@ -16,6 +16,18 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 
 ### Removed
 
+## [v0.8.0-alpha.3]
+
+### Added
+
+### Changed
+
+### Fixed
+
+- Redirect `_date/current` URLs to the same path without the date instead of returning 400 ([#146])
+
+### Removed
+
 ## [v0.8.0-alpha.2]
 
 ### Added
@@ -62,6 +74,7 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 
 - Remove unused `Repo::get_file_blob_hash` ([#137])
 
+[#146]: https://github.com/openlawlibrary/taf-server/pull/146
 [#145]: https://github.com/openlawlibrary/taf-server/pull/145
 [#143]: https://github.com/openlawlibrary/taf-server/pull/143
 [#142]: https://github.com/openlawlibrary/taf-server/pull/142
@@ -482,7 +495,8 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 
 ### Removed
 
-[Unreleased]: https://github.com/openlawlibrary/taf-server/compare/v0.8.0-alpha.2...HEAD
+[Unreleased]: https://github.com/openlawlibrary/taf-server/compare/v0.8.0-alpha.3...HEAD
+[v0.8.0-alpha.3]: https://github.com/openlawlibrary/taf-server/compare/v0.8.0-alpha.2...v0.8.0-alpha.3
 [v0.8.0-alpha.2]: https://github.com/openlawlibrary/taf-server/compare/v0.8.0-alpha.1...v0.8.0-alpha.2
 [v0.8.0-alpha.1]: https://github.com/openlawlibrary/taf-server/compare/v0.7.1...v0.8.0-alpha.1
 [v0.7.1]: https://github.com/openlawlibrary/taf-server/compare/v0.7.0...v0.7.1
