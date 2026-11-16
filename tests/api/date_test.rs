@@ -117,6 +117,28 @@ async fn test_date_where_date_is_not_canonical_expect_bad_request() {
 }
 
 #[actix_web::test]
+async fn test_date_where_date_is_current_expect_permanent_redirect_without_date() {
+    let archive_path = initialize_date_archive().await;
+
+    for (uri, expected_location) in [
+        ("/_date/current/doc", "/doc"),
+        ("/_date/current/doc?q=1", "/doc?q=1"),
+        ("/_date/current", "/"),
+        (
+            "/_publication/2020-01-01/_date/current/doc",
+            "/_publication/2020-01-01/doc",
+        ),
+        ("/_date/current//evil.example/doc", "/evil.example/doc"),
+        ("/_date/current/%5Cevil.example/doc", "/%5Cevil.example/doc"),
+    ] {
+        let (status, location, _) = get_date(archive_path.path(), uri).await;
+        let actual = (status, location.as_deref());
+        let expected = (StatusCode::MOVED_PERMANENTLY, Some(expected_location));
+        assert_eq!(actual, expected, "uri {uri}");
+    }
+}
+
+#[actix_web::test]
 async fn test_date_where_date_precedes_first_version_expect_not_found() {
     let archive_path = initialize_date_archive().await;
 

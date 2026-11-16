@@ -16,7 +16,8 @@ pub mod notifications;
 /// # Behavior
 /// - If the requested date matches the current version, the latest content is served.
 /// - If no commit exists for the given date, the closest prior version is used.
-/// - A date that is not `YYYY-MM-DD` returns 400, and a date before the
+/// - `current` as the date redirects (301) to the same path without `_date/current`.
+/// - Any other date that is not `YYYY-MM-DD` returns 400, and a date before the
 ///   publication's first version returns 404.
 /// - An unknown or revoked publication name redirects to the latest publication.
 /// - Content type is inferred from the file path.
@@ -32,7 +33,7 @@ use super::doc_transform::{
     insert_notification, update_doc_urls, update_json_content,
 };
 use super::state::App as AppState;
-use crate::server::api::versions::get_fonds_from_request;
+use crate::server::api::versions::{get_fonds_from_request, CURRENT_VERSION_DATE};
 use crate::utils;
 use crate::utils::archive::get_name_parts;
 use crate::{
@@ -67,6 +68,9 @@ pub async fn date(
     data: web::Data<AppState>,
     params: web::Path<request::Date>,
 ) -> impl Responder {
+    if params.version_date.as_deref() == Some(CURRENT_VERSION_DATE) {
+        return current_date_redirect(&req);
+    }
     if let Some(version_date) = params
         .version_date
         .as_deref()
@@ -263,6 +267,18 @@ fn publication_redirect(req: &HttpRequest, pub_name: &str) -> HttpResponse {
         .map_or("", |(_, rest)| rest);
     HttpResponse::Found()
         .insert_header((LOCATION, format!("/_publication/{pub_name}/{rest}")))
+        .finish()
+}
+
+/// Redirect a `.../_date/current/...` request to the same path without `/_date/current`.
+fn current_date_redirect(req: &HttpRequest) -> HttpResponse {
+    let path = req.path().replacen("/_date/current", "", 1);
+    let mut location = format!("/{}", path.trim_start_matches(['/', '\\']));
+    if !req.query_string().is_empty() {
+        location = format!("{location}?{}", req.query_string());
+    }
+    HttpResponse::MovedPermanently()
+        .insert_header((LOCATION, location))
         .finish()
 }
 
