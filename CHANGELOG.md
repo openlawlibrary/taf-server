@@ -16,32 +16,7 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 
 ### Removed
 
-## [v0.8.0-alpha.3]
-
-### Added
-
-### Changed
-
-### Fixed
-
-- Redirect `_date/current` URLs to the same path without the date instead of returning 400 ([#146])
-
-### Removed
-
-## [v0.8.0-alpha.2]
-
-### Added
-
-### Changed
-
-### Fixed
-
-- Index foreign key columns so deleting a fonds no longer scans whole tables ([#145])
-- Log slow database statements at debug level instead of warning ([#145])
-
-### Removed
-
-## [v0.8.0-alpha.1]
+## [v0.8.0]
 
 ### Added
 
@@ -56,6 +31,9 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 
 ### Fixed
 
+- Redirect `_date/current` URLs to the same path without the date instead of returning 400 ([#146])
+- Index foreign key columns so deleting a fonds no longer scans whole tables ([#145])
+- Log slow database statements at debug level instead of warning ([#145])
 - Build the docker image with Rust 1.97.1 ([#143])
 - Serve the `_date` endpoint's by using pooled queries instead of shared transaction and moving git blob looks to the blocking thread pool ([#141])
 - Add `nosniff` and `sandbox` headers to blob responses ([#137])
@@ -495,10 +473,8 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 
 ### Removed
 
-[Unreleased]: https://github.com/openlawlibrary/taf-server/compare/v0.8.0-alpha.3...HEAD
-[v0.8.0-alpha.3]: https://github.com/openlawlibrary/taf-server/compare/v0.8.0-alpha.2...v0.8.0-alpha.3
-[v0.8.0-alpha.2]: https://github.com/openlawlibrary/taf-server/compare/v0.8.0-alpha.1...v0.8.0-alpha.2
-[v0.8.0-alpha.1]: https://github.com/openlawlibrary/taf-server/compare/v0.7.1...v0.8.0-alpha.1
+[Unreleased]: https://github.com/openlawlibrary/taf-server/compare/v0.8.0...HEAD
+[v0.8.0]: https://github.com/openlawlibrary/taf-server/compare/v0.7.1...v0.8.0
 [v0.7.1]: https://github.com/openlawlibrary/taf-server/compare/v0.7.0...v0.7.1
 [v0.7.0]: https://github.com/openlawlibrary/taf-server/compare/v0.7.0-alpha.1...v0.7.0
 [v0.7.0-alpha.1]: https://github.com/openlawlibrary/taf-server/compare/v0.6.9...v0.7.0-alpha.1
