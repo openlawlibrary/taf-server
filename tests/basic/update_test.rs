@@ -205,6 +205,30 @@ fn test_update_where_auth_repo_reset_to_earlier_commit_expect_rebuild() {
 }
 
 #[test]
+fn test_update_where_fonds_deleted_expect_cascade_lookups_use_indexes() {
+    let td = new_archive();
+    let lookups = [
+        "EXPLAIN QUERY PLAN SELECT rowid FROM document_change WHERE doc_mpath = ?",
+        "EXPLAIN QUERY PLAN SELECT rowid FROM publication_version WHERE publication_id = ?",
+        "EXPLAIN QUERY PLAN SELECT rowid FROM publication WHERE last_valid_publication_id = ?",
+        "EXPLAIN QUERY PLAN SELECT rowid FROM data_repo_commits WHERE publication_id = ?",
+    ];
+    actix_web::rt::System::new().block_on(async {
+        let db = taf_server::db::init::connect(td.path()).await.unwrap();
+        for lookup in lookups {
+            let row = sqlx::query(lookup)
+                .bind("x")
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+            let detail: String = sqlx::Row::get(&row, "detail");
+            assert!(detail.starts_with("SEARCH"), "{lookup}: {detail}");
+        }
+        db.pool.close().await;
+    });
+}
+
+#[test]
 fn test_update_where_redirects_changed_expect_only_current_redirects_stored() {
     let td = new_archive();
     commit_publication(&td, "2021-04-23", &[]);
