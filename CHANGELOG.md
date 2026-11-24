@@ -12,9 +12,21 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 
 ### Changed
 
+- Rewrite historical-version pages with `quick-xml` instead of libxml2, streaming the
+  document so markup that is not edited keeps its original bytes ([#148])
+- Stop repairing malformed historical-version pages. libxml2 parsed them with error
+  recovery; `quick-xml` reports the error, and the page is served with its links
+  unrewritten and its path logged. No page in any partner archive is affected ([#148])
+
 ### Fixed
 
 ### Removed
+
+- Remove the `libxml` dependency, and with it `bindgen`, `clang-sys` and seven other
+  crates, so builds no longer need `libclang`. Removes the vcpkg libxml2 step from the
+  Windows release build ([#148])
+
+[#148]: https://github.com/openlawlibrary/taf-server/pull/148
 
 ## [v0.8.0]
 

@@ -38,14 +38,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      # `libxml` finds libxml2 through vcpkg on MSVC. Install the static
-      # (dynamic CRT) triplet so the released binary does not need libxml2 DLLs.
-      - name: Install libxml2 (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          vcpkg install libxml2:x64-windows-static-md
-          "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
       - uses: taiki-e/upload-rust-binary-action@4398438f25ce68e99e82e90744c88604b9b218a3
         with:
           # (required) Comma-separated list of binary names (non-extension portion of filename) to build and upload.
