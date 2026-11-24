@@ -189,7 +189,14 @@ pub async fn date(
         let mut doc = match update_doc_urls(doc_str, doc_path, &version_date, pub_name) {
             Ok(updated) => updated,
             Err(err) => {
-                tracing::error!(error = %err, "Couldn't update html");
+                // The page is served unchanged, so none of its links carry the
+                // historical prefix and a reader following one leaves the
+                // version they were viewing. Name the document so the markup
+                // can be found and fixed.
+                tracing::error!(
+                    error = %err,
+                    "Couldn't update html, serving it with links unrewritten: repo_name: {html_repo_name} | doc_path: {doc_path} | commit {commit}"
+                );
                 doc_str.to_owned()
             }
         };

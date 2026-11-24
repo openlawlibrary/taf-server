@@ -6,12 +6,12 @@
 //! version dates, and inserting notification banners into HTML documents.
 
 use chrono::NaiveDate;
-use libxml::parser::Parser;
-use libxml::tree::SaveOptions;
-use libxml::tree::{Document, Node, NodeType};
-use libxml::xpath::Context;
-use regex::Regex;
+use quick_xml::events::attributes::Attribute;
+use quick_xml::events::{BytesStart, BytesText, Event};
+use quick_xml::name::QName;
+use quick_xml::{Reader, Writer, XmlVersion};
 use serde_json::Value;
+use std::borrow::Cow;
 use url::Url;
 
 use crate::{
@@ -118,9 +118,9 @@ pub fn get_version_start_end_current(
 /// `<main id="area__content">` in the document.
 ///
 /// Uses string search to locate the opening tag and injects the notification
-/// immediately after it. libxml-rust's reference-counting model prevents safe
-/// cross-document DOM insertion before shared nodes, so string manipulation is
-/// used here instead.
+/// immediately after it, leaving every other byte of the document untouched.
+/// The banner is a fragment of already-rendered HTML, so there is nothing to
+/// gain from parsing the page to insert it.
 ///
 /// If the element is not found, the document is returned unchanged.
 #[must_use]
@@ -203,12 +203,8 @@ pub fn insert_notification(html_str: &str, notification_html: &str) -> String {
 ///
 /// # Errors
 ///
-/// Returns an error if the HTML cannot be parsed or if a required regular
-/// expression fails to compile.
-#[expect(
-    clippy::else_if_without_else,
-    reason = "Only specific values are handled; all other cases intentionally do nothing"
-)]
+/// Returns an error if the HTML is not well-formed, or if the rewritten
+/// document is not valid UTF-8.
 pub fn update_doc_urls(
     html_doc_str: &str,
     path_str: &str,
@@ -221,204 +217,340 @@ pub fn update_doc_urls(
         format!("/{path_str}")
     };
     let versioned_url = build_url_prefix(pub_name, version_date);
-    let version_date_fmt = NaiveDate::parse_from_str(version_date, "%Y-%m-%d").map_or_else(
-        |_| version_date.to_owned(),
-        |date| date.format("%B %d, %Y").to_string(),
+    let versioned_title = format!(
+        "Historical version from {}",
+        format_date_display(version_date)
     );
-    let versioned_title = format!("Historical version from {version_date_fmt}");
-    let heading_re = Regex::new(r"^h\d$")?;
 
-    let parser = Parser::default();
-    let doc: Document = parser.parse_string(html_doc_str)?;
-    let ctx =
-        Context::new(&doc).map_err(|err| anyhow::anyhow!("Failed to create Context: {err:?}"))?;
+    let mut reader = Reader::from_str(html_doc_str);
+    let mut writer = Writer::new(Vec::new());
 
-    let nodes = ctx
-        .evaluate("//*")
-        .map_err(|err| anyhow::anyhow!("Failed to evaluate XPath '//*': {err:?}"))?
-        .get_nodes_as_vec();
+    // Depth of the element currently open: 0 outside the root, 1 inside
+    // `<html>`, 2 inside `<head>`.
+    let mut depth: usize = 0;
+    let mut in_head = false;
+    let mut head_children: usize = 0;
+    let mut meta_inserted = false;
 
-    for mut node in nodes {
-        let tag = node.get_name();
+    loop {
+        let event = reader.read_event()?;
 
-        match tag.as_str() {
-            "meta" => {
-                if let Some(prop) = node.get_attribute("property") {
-                    if prop == "og:title" {
-                        if let Some(content) = node.get_attribute("content") {
-                            node.set_attribute(
-                                "content",
-                                &format!("{content} | {versioned_title}"),
-                            )
-                            .map_err(|_err| anyhow::anyhow!("Failed to update attribute"))?;
-                        }
-                    } else if prop == "og:url" {
-                        if let Some(content) = node.get_attribute("content") {
-                            let updated = content.replace(&path, &format!("{versioned_url}{path}"));
-                            node.set_attribute("content", &updated)
-                                .map_err(|_err| anyhow::anyhow!("Failed to update attribute"))?;
-                        }
+        if in_head && depth == 2 && !meta_inserted && is_significant(&event) {
+            head_children += 1;
+            if head_children > HEAD_INSERT_INDEX {
+                write_historical_meta_before(&mut writer, &versioned_url)?;
+                meta_inserted = true;
+            }
+        }
+
+        match event {
+            Event::Eof => break,
+            Event::Start(start) => {
+                if depth == 1 && !meta_inserted && start.name().as_ref() == b"head" {
+                    in_head = true;
+                    head_children = 0;
+                }
+                match rewrite_element(&start, &path, &versioned_url, &versioned_title) {
+                    Some(updated) => writer.write_event(Event::Start(updated))?,
+                    None => writer.write_event(Event::Start(start))?,
+                }
+                depth += 1;
+            }
+            Event::Empty(start) => {
+                if depth == 1 && !meta_inserted && start.name().as_ref() == b"head" {
+                    // A self-closing `<head/>` has no children to count, so the
+                    // meta tag is appended just as it would be to an empty
+                    // `<head></head>`.
+                    writer.write_event(Event::Start(start.borrow()))?;
+                    write_historical_meta_at_end(&mut writer, &versioned_url)?;
+                    writer.write_event(Event::End(start.to_end()))?;
+                    meta_inserted = true;
+                } else {
+                    match rewrite_element(&start, &path, &versioned_url, &versioned_title) {
+                        Some(updated) => writer.write_event(Event::Empty(updated))?,
+                        None => writer.write_event(Event::Empty(start))?,
                     }
                 }
-
-                if let Some(itemprop) = node.get_attribute("itemprop") {
-                    if itemprop == "full-html" || itemprop == "toc-json" {
-                        update_el_attr(&mut node, "content", &path, &versioned_url);
+            }
+            Event::End(end) => {
+                if in_head && depth == 2 && end.name().as_ref() == b"head" {
+                    if !meta_inserted {
+                        write_historical_meta_at_end(&mut writer, &versioned_url)?;
+                        meta_inserted = true;
                     }
+                    in_head = false;
                 }
+                depth = depth.saturating_sub(1);
+                writer.write_event(Event::End(end))?;
             }
-
-            "a" => update_el_attr(&mut node, "href", &path, &versioned_url),
-
-            "span" => update_el_attr(&mut node, "id", &path, &versioned_url),
-
-            "object" => {
-                if node.get_attribute("type").as_deref() == Some("application/pdf") {
-                    update_el_attr(&mut node, "data", &path, &versioned_url);
-                }
-            }
-
-            _ if heading_re.is_match(&tag) => {
-                update_el_attr(&mut node, "id", &path, &versioned_url);
-            }
-
-            _ => {}
+            other @ (Event::Text(_)
+            | Event::CData(_)
+            | Event::Comment(_)
+            | Event::Decl(_)
+            | Event::PI(_)
+            | Event::DocType(_)
+            | Event::GeneralRef(_)) => writer.write_event(other)?,
         }
     }
 
-    // Insert historical-prefix meta tag
-    let head = ctx
-        .evaluate("/html/head")
-        .map_err(|_err| anyhow::anyhow!("Failed to update attribute"))?
-        .get_nodes_as_vec()
-        .into_iter()
-        .next();
-
-    add_historical_meta_tag(head, &doc, &versioned_url)?;
-
-    let options = SaveOptions {
-        no_declaration: true,
-        ..Default::default()
-    };
-    Ok(doc.to_string_with_options(options))
+    Ok(String::from_utf8(writer.into_inner())?)
 }
 
-/// Adds a `<meta>` tag with the `itemprop="historical-prefix"` attribute to the
-/// document `<head>`.
-///
-/// The meta tag's `content` attribute is set to the provided historical URL
-/// prefix (typically a versioned `/_date/...` path). If a `<head>` element
-/// exists, the tag is inserted at a deterministic position among its children (The element is inserted at index 13 to align with existing meta tag grouping).
-/// If no `<head>` is found, the document is left unchanged.
-///
-/// # Arguments
-///
-/// * `doc` - Parsed HTML document to be modified
-/// * `versioned_url` - Historical URL prefix to store in the meta tag
-///
-/// # Errors
-///
-/// Returns an error if DOM manipulation fails, such as when creating nodes,
-/// setting attributes, or inserting the meta element.
-fn add_historical_meta_tag(
-    head_node: Option<Node>,
-    doc: &Document,
-    versioned_url: &str,
-) -> anyhow::Result<(), anyhow::Error> {
-    if let Some(mut head) = head_node {
-        let mut meta = Node::new("meta", None, doc)
-            .map_err(|err| anyhow::anyhow!("Failed to creat 'meta' node: {err:?}"))?;
-        meta.set_attribute("itemprop", "historical-prefix")
-            .map_err(|err| anyhow::anyhow!("Failed to update attribute 'itemprop': {err}"))?;
-        meta.set_attribute("content", versioned_url)
-            .map_err(|err| anyhow::anyhow!("Failed to update attribute 'content': {err}"))?;
+/// Position among `<head>`'s significant children at which the
+/// historical-prefix meta tag is inserted, so that it lands among the other
+/// meta tags rather than at the top of the head. A `<head>` with fewer
+/// children gets the tag appended instead.
+const HEAD_INSERT_INDEX: usize = 13;
 
-        let mut element_children: Vec<Node> = head
-            .get_child_nodes()
-            .into_iter()
-            .filter(|n| {
-                n.get_type() != Some(NodeType::TextNode) || !n.get_content().trim().is_empty()
-            })
-            .collect();
-
-        if let Some(ref_node) = element_children.get_mut(13) {
-            // Used for formating indentations
-            let mut newline = Node::new_text("\n    ", doc)
-                .map_err(|err| anyhow::anyhow!("Failed to create text node: {err:?}"))?;
-            ref_node
-                .add_prev_sibling(&mut meta)
-                .map_err(|err| anyhow::anyhow!("Failed to add_prev_sibling 'meta': {err}"))?;
-            ref_node
-                .add_prev_sibling(&mut newline)
-                .map_err(|err| anyhow::anyhow!("Failed to add_prev_sibling 'text': {err}"))?;
-        } else {
-            // Used for formating indentations
-            let mut newline = Node::new_text("\n  ", doc)
-                .map_err(|err| anyhow::anyhow!("Failed to create text node: {err:?}"))?;
-            let mut newspaces = Node::new_text("  ", doc)
-                .map_err(|err| anyhow::anyhow!("Failed to create text node: {err:?}"))?;
-            head.add_child(&mut newspaces)
-                .map_err(|err| anyhow::anyhow!("Failed to aooend 'text' node to 'head': {err}"))?;
-            head.add_child(&mut meta)
-                .map_err(|err| anyhow::anyhow!("Failed to append 'meta' node to 'head': {err}"))?;
-            head.add_child(&mut newline)
-                .map_err(|err| anyhow::anyhow!("Failed to append 'text' node to 'head': {err}"))?;
-        }
+/// Whether an event counts as a `<head>` child when locating the insertion
+/// point.
+///
+/// Mirrors the libxml2 implementation, which dropped whitespace-only text
+/// nodes but kept comments: real pages group their meta tags with
+/// `<!--Meta-->` style comments, and those shift the insertion point.
+#[expect(
+    clippy::pattern_type_mismatch,
+    reason = "Matching the reference avoids a `ref` binding for the text arm"
+)]
+fn is_significant(event: &Event<'_>) -> bool {
+    match event {
+        Event::Start(_)
+        | Event::Empty(_)
+        | Event::Comment(_)
+        | Event::CData(_)
+        | Event::GeneralRef(_)
+        | Event::PI(_) => true,
+        Event::Text(text) => !text.iter().all(u8::is_ascii_whitespace),
+        Event::End(_) | Event::Decl(_) | Event::DocType(_) | Event::Eof => false,
     }
+}
 
+/// Writes the historical-prefix meta tag immediately before an existing
+/// `<head>` child.
+///
+/// The newline and indent go *after* the tag, lining up the sibling that
+/// follows it: the whitespace that originally preceded that sibling has
+/// already been written and now indents the meta tag itself.
+fn write_historical_meta_before(
+    writer: &mut Writer<Vec<u8>>,
+    versioned_url: &str,
+) -> anyhow::Result<()> {
+    writer.write_event(Event::Empty(historical_meta(versioned_url)))?;
+    writer.write_event(Event::Text(BytesText::from_escaped("\n    ")))?;
     Ok(())
 }
 
-/// Updates a single HTML element attribute by rewriting local URLs.
+/// Appends the historical-prefix meta tag as the last child of `<head>`.
 ///
-/// If the attribute value ends with `.pdf`, the URL is resolved against the
-/// normalized document path. Otherwise, local URLs starting with `/` are
-/// prefixed with the provided historical version URL.
+/// The leading two spaces complete the indent of the whitespace already
+/// written before `</head>`.
+fn write_historical_meta_at_end(
+    writer: &mut Writer<Vec<u8>>,
+    versioned_url: &str,
+) -> anyhow::Result<()> {
+    writer.write_event(Event::Text(BytesText::from_escaped("  ")))?;
+    writer.write_event(Event::Empty(historical_meta(versioned_url)))?;
+    writer.write_event(Event::Text(BytesText::from_escaped("\n  ")))?;
+    Ok(())
+}
+
+/// Builds the `<meta itemprop="historical-prefix">` tag.
+fn historical_meta(versioned_url: &str) -> BytesStart<'static> {
+    let mut meta = BytesStart::new("meta");
+    meta.push_attribute(Attribute {
+        key: QName(b"itemprop"),
+        value: Cow::Borrowed(b"historical-prefix"),
+    });
+    meta.push_attribute(Attribute {
+        key: QName(b"content"),
+        value: Cow::Owned(escape_attribute(versioned_url).into_bytes()),
+    });
+    meta
+}
+
+/// Returns the rewritten form of `start`, or `None` if it needs no change.
 ///
-/// # Arguments
-///
-/// * `node` - Mutable reference to the xml node
-/// * `attr` - Attribute name to update (e.g. `href`, `src`, `content`)
-/// * `path` - Current document path, used for resolving relative URLs
-/// * `versioned_url` - Prefix added to local URLs for historical versions
-///
-#[expect(
-    clippy::case_sensitive_file_extension_comparisons,
-    reason = "File extension comparison is intentionally case-sensitive; only lowercase `.pdf` URLs are expecte"
-)]
-pub fn update_el_attr(node: &mut Node, attr: &str, path: &str, versioned_url: &str) {
-    let Some(value) = node.get_attribute(attr) else {
-        return;
+/// Mirrors the element and attribute pairs the libxml2 implementation walked:
+/// `og:title` and `og:url` meta tags, the `full-html` and `toc-json` meta
+/// tags, `a/@href`, `span/@id`, a PDF `object/@data`, and headings' `@id`.
+fn rewrite_element(
+    start: &BytesStart<'_>,
+    path: &str,
+    versioned_url: &str,
+    versioned_title: &str,
+) -> Option<BytesStart<'static>> {
+    let qname = start.name();
+    let name = qname.as_ref();
+
+    if name == b"meta" {
+        return rewrite_meta(start, path, versioned_url, versioned_title);
+    }
+
+    let attr = if name == b"a" {
+        "href"
+    } else if name == b"span" {
+        "id"
+    } else if name == b"object" {
+        if attribute_value(start, "type").as_deref() != Some("application/pdf") {
+            return None;
+        }
+        "data"
+    } else if is_heading(name) {
+        "id"
+    } else {
+        return None;
     };
 
-    let new_value = if value.ends_with(".pdf") {
+    let value = attribute_value(start, attr)?;
+    Some(with_attribute(
+        start,
+        attr,
+        &rewritten_url(&value, path, versioned_url),
+    ))
+}
+
+/// Rewrites the `content` attribute of the meta tags carrying a URL or the
+/// page title.
+#[expect(
+    clippy::else_if_without_else,
+    reason = "Only specific values are handled; all other cases intentionally do nothing"
+)]
+fn rewrite_meta(
+    start: &BytesStart<'_>,
+    path: &str,
+    versioned_url: &str,
+    versioned_title: &str,
+) -> Option<BytesStart<'static>> {
+    let mut content = attribute_value(start, "content")?;
+    let mut changed = false;
+
+    if let Some(property) = attribute_value(start, "property") {
+        if property == "og:title" {
+            content = format!("{content} | {versioned_title}");
+            changed = true;
+        } else if property == "og:url" {
+            content = content.replace(path, &format!("{versioned_url}{path}"));
+            changed = true;
+        }
+    }
+
+    if let Some(itemprop) = attribute_value(start, "itemprop") {
+        if itemprop == "full-html" || itemprop == "toc-json" {
+            content = rewritten_url(&content, path, versioned_url);
+            changed = true;
+        }
+    }
+
+    changed.then(|| with_attribute(start, "content", &content))
+}
+
+/// Matches `h` followed by a single digit, as the previous `^h\d$` regex did.
+fn is_heading(name: &[u8]) -> bool {
+    matches!(*name, [b'h', digit] if digit.is_ascii_digit())
+}
+
+/// Rewrites one URL attribute value for a historical version.
+///
+/// A `.pdf` value is resolved against the document's own directory; any other
+/// local value, meaning one starting with `/`, is prefixed with the historical
+/// URL. Everything else is left alone.
+#[expect(
+    clippy::case_sensitive_file_extension_comparisons,
+    reason = "File extension comparison is intentionally case-sensitive; only lowercase `.pdf` URLs are expected"
+)]
+fn rewritten_url(value: &str, path: &str, versioned_url: &str) -> String {
+    if value.ends_with(".pdf") {
         let base = path
             .replace("/index.html", "")
             .replace("/index.full.html", "")
             .trim_end_matches('/')
             .to_owned();
-        // Url:parse return Err on invalid url - so for paths we add dummy schema/base
-        if let Ok(base_url) = Url::parse(&format!("http://oll.dummy.com{base}")) {
-            base_url
-                .join(&value)
-                .map_or(value, |joined| joined.path().to_owned())
-        } else {
-            value
-        }
+        // `Url::parse` rejects a bare path, so give it a dummy scheme and host.
+        Url::parse(&format!("http://oll.dummy.com{base}"))
+            .ok()
+            .and_then(|base_url| base_url.join(value).ok())
+            .map_or_else(|| value.to_owned(), |joined| joined.path().to_owned())
+    } else if value.starts_with('/') {
+        format!("{versioned_url}{value}")
     } else {
-        // Prefix only local URLs
-        if value.starts_with('/') {
-            format!("{versioned_url}{value}")
+        value.to_owned()
+    }
+}
+
+/// Returns the unescaped value of the `name` attribute on `start`.
+fn attribute_value(start: &BytesStart<'_>, name: &str) -> Option<String> {
+    let attribute = start
+        .attributes()
+        .with_checks(false)
+        .flatten()
+        .find(|attr| attr.key.as_ref() == name.as_bytes())?;
+    attribute
+        .normalized_value(XmlVersion::Implicit1_0)
+        .ok()
+        .map(Cow::into_owned)
+}
+
+/// Returns a copy of `start` with `name` set to `value`, keeping the other
+/// attributes and their order.
+///
+/// The element is rebuilt, so one originally written across several lines
+/// comes back on a single line. Only elements actually rewritten are
+/// affected; every other byte of the document is passed through untouched.
+fn with_attribute(start: &BytesStart<'_>, name: &str, value: &str) -> BytesStart<'static> {
+    let mut out = BytesStart::new(String::from_utf8_lossy(start.name().as_ref()).into_owned());
+    for attr in start.attributes().with_checks(false).flatten() {
+        if attr.key.as_ref() == name.as_bytes() {
+            out.push_attribute(Attribute {
+                key: QName(name.as_bytes()),
+                value: Cow::Owned(escape_attribute(value).into_bytes()),
+            });
+        } else if attr.value.contains(&b'"') {
+            // `attr.value` is the source bytes from between the original
+            // quotes, so a single-quoted value may hold a literal `"`.
+            // `push_attribute` always writes double quotes, which would end
+            // the value early and produce broken markup.
+            out.push_attribute(Attribute {
+                key: attr.key,
+                value: Cow::Owned(
+                    String::from_utf8_lossy(&attr.value)
+                        .replace('"', "&quot;")
+                        .into_bytes(),
+                ),
+            });
         } else {
-            value
-        }
-    };
-    match node.set_attribute(attr, &new_value) {
-        Ok(()) => {}
-        Err(_) => {
-            tracing::error!("Not able to update node attribute {attr}");
+            out.push_attribute(attr);
         }
     }
+    out
+}
+
+/// Escapes an attribute value the way libxml2 did: `&`, `<`, `>` and `"`, plus
+/// the whitespace that has to survive as a character reference, but not `'`.
+///
+/// quick-xml's own escaping also rewrites `'` as `&apos;`, which would change
+/// the bytes of every page whose title contains an apostrophe.
+///
+/// Tab, newline and carriage return must be written as references rather than
+/// literally. `normalized_value` decodes `&#10;` to a newline when the value is
+/// read, and attribute-value normalization turns a literal newline back into a
+/// space when it is read again - so writing one out silently replaces it. Over
+/// a hundred San Mateo `og:title` values carry `&#10;`, and a DC one carries
+/// `&#9;`.
+fn escape_attribute(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\n' => out.push_str("&#10;"),
+            '\r' => out.push_str("&#13;"),
+            '\t' => out.push_str("&#9;"),
+            _ => out.push(character),
+        }
+    }
+    out
 }
 
 /// Updates all URLs in a JSON file according to a historical version.
@@ -548,25 +680,33 @@ fn update_index_json(index: &mut Value, url_prefix: &str) {
 mod tests {
     use super::*;
 
-    fn test_html_transformation(
+    /// Assert that `update_doc_urls` produces exactly `expected_output`.
+    ///
+    /// The expected value is compared literally, byte for byte. It used to be
+    /// parsed and re-serialized with libxml2 first, which normalized both
+    /// sides through the same serializer and so made these tests structurally
+    /// incapable of detecting a change of XML library -- which is now the one
+    /// thing they have to guard.
+    ///
+    /// On a mismatch the actual output is printed raw, so that after an
+    /// intentional change it can be copied back into the test:
+    ///
+    /// ```text
+    /// cargo test doc_transform -- --nocapture
+    /// ```
+    fn assert_html_transformation(
+        name: &str,
         html_input: &str,
         expected_output: &str,
         path: &str,
         version_date: &str,
     ) {
-        let parser = Parser::default();
-        let doc: Document = parser
-            .parse_string(expected_output)
-            .expect("parse should succeed");
-        let options = SaveOptions {
-            no_declaration: true,
-            as_xml: true,
-            ..Default::default()
-        };
-        let expected_output_fmt = doc.to_string_with_options(options);
-        let result = update_doc_urls(html_input, path, version_date, "");
-        let output = result.expect("function should succeed");
-        assert_eq!(output, expected_output_fmt);
+        let output = update_doc_urls(html_input, path, version_date, "")
+            .expect("update_doc_urls should succeed");
+        if output != expected_output {
+            println!("--- actual output for {name} ---\n{output}\n--- end {name} ---");
+        }
+        assert_eq!(output, expected_output, "{name}: serialized output changed");
     }
 
     #[test]
@@ -600,7 +740,7 @@ mod tests {
         "#;
         let version_date = "12-03-2025";
         let path = "/some/test/path/";
-        test_html_transformation(html_input, expected_output, path, version_date);
+        assert_html_transformation("a_tag", html_input, expected_output, path, version_date);
     }
 
     #[test]
@@ -636,7 +776,7 @@ mod tests {
         "#;
         let version_date = "02-09-2024";
         let path = "/some/test/path/";
-        test_html_transformation(html_input, expected_output, path, version_date);
+        assert_html_transformation("span_tag", html_input, expected_output, path, version_date);
     }
 
     #[test]
@@ -648,8 +788,8 @@ mod tests {
   </head>
   <body>
     <h1 id="/test">Introduction</h1>
-    <h2 id="introduction">Introduction</h1>
-    <h6 id="/">Introduction</h1>
+    <h2 id="introduction">Introduction</h2>
+    <h6 id="/">Introduction</h6>
   </body>
 </html>
         "#;
@@ -661,14 +801,14 @@ mod tests {
   </head>
   <body>
     <h1 id="/_date/02-09-2024/test">Introduction</h1>
-    <h2 id="introduction">Introduction</h1>
-    <h6 id="/_date/02-09-2024/">Introduction</h1>
+    <h2 id="introduction">Introduction</h2>
+    <h6 id="/_date/02-09-2024/">Introduction</h6>
   </body>
 </html>
         "#;
         let version_date = "02-09-2024";
         let path = "/some/test/path/";
-        test_html_transformation(html_input, expected_output, path, version_date);
+        assert_html_transformation("h_tag", html_input, expected_output, path, version_date);
     }
 
     #[test]
@@ -709,21 +849,13 @@ mod tests {
     <meta itemprop="historical-prefix" content="/_date/02-09-2024"/>
   </head>
   <body>
-    <object
-        data="/some/test/documents/example.pdf"
-        type="application/pdf"
-        width="600"
-        height="800">
+    <object data="/some/test/documents/example.pdf" type="application/pdf" width="600" height="800">
         <p>
             Your browser does not support embedded PDFs.
             <a href="/some/test/documents/example.pdf">Download the PDF</a>.
         </p>
     </object>
-    <object
-        data="/_date/02-09-2024/not/ending/on/dot/pdf"
-        type="application/pdf"
-        width="600"
-        height="800">
+    <object data="/_date/02-09-2024/not/ending/on/dot/pdf" type="application/pdf" width="600" height="800">
         <p>
             Your browser does not support embedded PDFs.
             <a href="/_date/02-09-2024/">Download the PDF</a>.
@@ -734,7 +866,13 @@ mod tests {
         "#;
         let version_date = "02-09-2024";
         let path = "/some/test/path/";
-        test_html_transformation(html_input, expected_output, path, version_date);
+        assert_html_transformation(
+            "object_tag",
+            html_input,
+            expected_output,
+            path,
+            version_date,
+        );
     }
 
     #[test]
@@ -761,11 +899,9 @@ mod tests {
 <!DOCTYPE html SYSTEM "about:legacy-compat">
 <html lang="en-US" class="no-js">
   <head>
-    <meta property="og:url"
-        content="https://law.cityofsanmateo.org/_date/2025-03-04/us/ca/cities/san-mateo/ordinances/2020/19" />
+    <meta property="og:url" content="https://law.cityofsanmateo.org/_date/2025-03-04/us/ca/cities/san-mateo/ordinances/2020/19"/>
     <meta property="og:type" content="article" />
-    <meta property="og:title"
-        content="Ord. No. 2020-19. Emergency Ordinance – Outdoor Business Operations | City of San Mateo Law Library | Historical version from March 04, 2025" />
+    <meta property="og:title" content="Ord. No. 2020-19. Emergency Ordinance – Outdoor Business Operations | City of San Mateo Law Library | Historical version from March 04, 2025"/>
     <meta itemprop="toc-json" content="/_date/2025-03-04/us/ca/cities/san-mateo/ordinances/2020/19/index.json" data-document="href"/>
     <meta itemprop="doc-type" content="document" data-document=""/>
     <meta itemprop="doc-num" content="2020-19"/>
@@ -778,7 +914,159 @@ mod tests {
         "#;
         let version_date = "2025-03-04";
         let path = "/us/ca/cities/san-mateo/ordinances/2020/19";
-        test_html_transformation(html_input, expected_output, path, version_date);
+        assert_html_transformation("meta_tag", html_input, expected_output, path, version_date);
+    }
+
+    /// A `<head>` with more than `HEAD_INSERT_INDEX` significant children, so
+    /// the historical-prefix meta tag is spliced in among the others rather
+    /// than appended at the end. Every real page takes this branch.
+    ///
+    /// The `<!--Meta-->` and `<!--Assets-->` comments are load bearing: they
+    /// count as children when locating the insertion point, matching libxml2,
+    /// which dropped whitespace-only text nodes but kept comments. Remove one
+    /// and the meta tag moves down a line.
+    ///
+    /// Counting the significant children of `<head>`:
+    ///  1 `<!--Meta-->`              6 `toc-json`      11 `app.css`
+    ///  2 `charset`                  7 `doc-type`      12 `print.css`
+    ///  3 `og:url`                   8 `doc-num`       13 `<title>`
+    ///  4 `og:type`                  9 `full-html`     14 `<script>`  <- before this
+    ///  5 `og:title`                10 `<!--Assets-->` 15 `<style>`
+    #[test]
+    fn test_meta_tag_inserted_among_a_full_head() {
+        let html_input = r#"
+<!DOCTYPE html SYSTEM "about:legacy-compat">
+<html lang="en-US" class="no-js">
+  <head>
+    <!--Meta-->
+    <meta charset="utf-8" />
+    <meta property="og:url" content="https://law.cityofsanmateo.org/us/ca/cities/san-mateo/ordinances/2020/19" />
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="Ord. No. 2020-19 | City of San Mateo Law Library" />
+    <meta itemprop="toc-json" content="/us/ca/cities/san-mateo/ordinances/2020/19/index.json" />
+    <meta itemprop="doc-type" content="document" />
+    <meta itemprop="doc-num" content="2020-19" />
+    <meta itemprop="full-html" content="/us/ca/cities/san-mateo/ordinances/2020/19/index.full.html" />
+    <!--Assets-->
+    <link rel="stylesheet" href="/_assets/app.css" />
+    <link rel="stylesheet" href="/_assets/print.css" />
+    <title>Ord. No. 2020-19</title>
+    <script src="/_assets/app.js"></script>
+    <style>.icon { color: #000; }</style>
+  </head>
+  <body>
+  </body>
+</html>
+        "#;
+        let expected_output = r#"
+<!DOCTYPE html SYSTEM "about:legacy-compat">
+<html lang="en-US" class="no-js">
+  <head>
+    <!--Meta-->
+    <meta charset="utf-8" />
+    <meta property="og:url" content="https://law.cityofsanmateo.org/_date/2025-03-04/us/ca/cities/san-mateo/ordinances/2020/19"/>
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="Ord. No. 2020-19 | City of San Mateo Law Library | Historical version from March 04, 2025"/>
+    <meta itemprop="toc-json" content="/_date/2025-03-04/us/ca/cities/san-mateo/ordinances/2020/19/index.json"/>
+    <meta itemprop="doc-type" content="document" />
+    <meta itemprop="doc-num" content="2020-19" />
+    <meta itemprop="full-html" content="/_date/2025-03-04/us/ca/cities/san-mateo/ordinances/2020/19/index.full.html"/>
+    <!--Assets-->
+    <link rel="stylesheet" href="/_assets/app.css" />
+    <link rel="stylesheet" href="/_assets/print.css" />
+    <title>Ord. No. 2020-19</title>
+    <meta itemprop="historical-prefix" content="/_date/2025-03-04"/>
+    <script src="/_assets/app.js"></script>
+    <style>.icon { color: #000; }</style>
+  </head>
+  <body>
+  </body>
+</html>
+        "#;
+        let version_date = "2025-03-04";
+        let path = "/us/ca/cities/san-mateo/ordinances/2020/19";
+        assert_html_transformation(
+            "meta_tag_full_head",
+            html_input,
+            expected_output,
+            path,
+            version_date,
+        );
+    }
+
+    /// Tab, newline and carriage return have to come back out as character
+    /// references. `normalized_value` decodes `&#10;` to a newline on the way
+    /// in, and attribute-value normalization would turn a literal newline into
+    /// a space the next time the page is read, so writing one out loses it.
+    #[test]
+    fn test_og_title_keeps_newline_reference() {
+        let html_input = r#"
+<!DOCTYPE html SYSTEM "about:legacy-compat">
+<html lang="en-US">
+  <head>
+    <meta property="og:title" content="Ord. No. 2020-19&#10;Outdoor Operations&#9;(amended)" />
+  </head>
+  <body>
+  </body>
+</html>
+        "#;
+        let expected_output = r#"
+<!DOCTYPE html SYSTEM "about:legacy-compat">
+<html lang="en-US">
+  <head>
+    <meta property="og:title" content="Ord. No. 2020-19&#10;Outdoor Operations&#9;(amended) | Historical version from March 04, 2025"/>
+    <meta itemprop="historical-prefix" content="/_date/2025-03-04"/>
+  </head>
+  <body>
+  </body>
+</html>
+        "#;
+        let version_date = "2025-03-04";
+        let path = "/us/ca/cities/san-mateo/ordinances/2020/19";
+        assert_html_transformation(
+            "og_title_newline",
+            html_input,
+            expected_output,
+            path,
+            version_date,
+        );
+    }
+
+    /// An attribute that is carried across unchanged is re-quoted with double
+    /// quotes, so a single-quoted source value holding a literal `"` has to be
+    /// re-encoded or the markup breaks at that quote.
+    #[test]
+    fn test_single_quoted_attribute_keeps_its_double_quotes() {
+        let html_input = r#"
+<!DOCTYPE html SYSTEM "about:legacy-compat">
+<html lang="en-US">
+  <head>
+  </head>
+  <body>
+    <a href="/us/ca/cities/san-mateo/ordinances/2020/19" title='say "hi"'>link</a>
+  </body>
+</html>
+        "#;
+        let expected_output = r#"
+<!DOCTYPE html SYSTEM "about:legacy-compat">
+<html lang="en-US">
+  <head>
+    <meta itemprop="historical-prefix" content="/_date/2025-03-04"/>
+  </head>
+  <body>
+    <a href="/_date/2025-03-04/us/ca/cities/san-mateo/ordinances/2020/19" title="say &quot;hi&quot;">link</a>
+  </body>
+</html>
+        "#;
+        let version_date = "2025-03-04";
+        let path = "/us/ca/cities/san-mateo/ordinances/2020/19";
+        assert_html_transformation(
+            "single_quoted_attribute",
+            html_input,
+            expected_output,
+            path,
+            version_date,
+        );
     }
 
     #[test]
