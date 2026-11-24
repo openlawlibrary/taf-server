@@ -12,6 +12,16 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 
 ### Changed
 
+### Fixed
+
+### Removed
+
+## [v0.8.1-alpha.1]
+
+### Added
+
+### Changed
+
 - Rewrite historical-version pages with `quick-xml` instead of libxml2, streaming the
   document so markup that is not edited keeps its original bytes ([#148])
 - Stop repairing malformed historical-version pages. libxml2 parsed them with error
@@ -485,7 +495,8 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 
 ### Removed
 
-[Unreleased]: https://github.com/openlawlibrary/taf-server/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/openlawlibrary/taf-server/compare/v0.8.1-alpha.1...HEAD
+[v0.8.1-alpha.1]: https://github.com/openlawlibrary/taf-server/compare/v0.8.0...v0.8.1-alpha.1
 [v0.8.0]: https://github.com/openlawlibrary/taf-server/compare/v0.7.1...v0.8.0
 [v0.7.1]: https://github.com/openlawlibrary/taf-server/compare/v0.7.0...v0.7.1
 [v0.7.0]: https://github.com/openlawlibrary/taf-server/compare/v0.7.0-alpha.1...v0.7.0
