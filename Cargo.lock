@@ -3063,7 +3063,7 @@ dependencies = [
 
 [[package]]
 name = "taf-server"
-version = "0.8.0"
+version = "0.8.1-alpha.1"
 dependencies = [
  "actix-http",
  "actix-service",
