@@ -16,7 +16,7 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 
 ### Removed
 
-## [v0.8.1-alpha.1]
+## [v0.8.1]
 
 ### Added
 
@@ -495,8 +495,8 @@ and this project adheres to a _modified_ form of _[Semantic Versioning][semver]_
 
 ### Removed
 
-[Unreleased]: https://github.com/openlawlibrary/taf-server/compare/v0.8.1-alpha.1...HEAD
-[v0.8.1-alpha.1]: https://github.com/openlawlibrary/taf-server/compare/v0.8.0...v0.8.1-alpha.1
+[Unreleased]: https://github.com/openlawlibrary/taf-server/compare/v0.8.1...HEAD
+[v0.8.1]: https://github.com/openlawlibrary/taf-server/compare/v0.8.0...v0.8.1
 [v0.8.0]: https://github.com/openlawlibrary/taf-server/compare/v0.7.1...v0.8.0
 [v0.7.1]: https://github.com/openlawlibrary/taf-server/compare/v0.7.0...v0.7.1
 [v0.7.0]: https://github.com/openlawlibrary/taf-server/compare/v0.7.0-alpha.1...v0.7.0
